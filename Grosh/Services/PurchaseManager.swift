@@ -19,8 +19,11 @@ final class PurchaseManager {
     var lastError: String?
 
     /// Переключатель для разработки: открывает Pro без покупки (только в Debug-сборке).
-    var debugPro = UserDefaults.standard.bool(forKey: "debugPro") {
-        didSet { UserDefaults.standard.set(debugPro, forKey: "debugPro") }
+    private(set) var debugPro = UserDefaults.standard.bool(forKey: "debugPro")
+
+    func setDebugPro(_ on: Bool) {
+        debugPro = on
+        UserDefaults.standard.set(on, forKey: "debugPro")
     }
 
     var isPro: Bool {

@@ -14,7 +14,6 @@ struct MoreView: View {
     @State private var exportURL: URL?
 
     var body: some View {
-        @Bindable var store = store
         NavigationStack {
             List {
                 if !store.isPro {
@@ -118,7 +117,7 @@ struct MoreView: View {
 
                 #if DEBUG
                 Section("Разработка") {
-                    Toggle("Pro без покупки", isOn: $store.debugPro)
+                    Toggle("Pro без покупки", isOn: Binding(get: { store.debugPro }, set: { store.setDebugPro($0) }))
                 }
                 #endif
 
