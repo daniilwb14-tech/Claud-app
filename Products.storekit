@@ -1,0 +1,92 @@
+{
+  "identifier" : "6F0B8E1A",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "2990",
+      "familyShareable" : false,
+      "internalID" : "6700000003",
+      "localizations" : [
+        {
+          "description" : "Все функции Pro одним платежом",
+          "displayName" : "Грош Pro навсегда",
+          "locale" : "ru"
+        }
+      ],
+      "productID" : "grosh.pro.lifetime",
+      "referenceName" : "Pro Lifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_locale" : "ru",
+    "_storefront" : "RUS"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21500001",
+      "localizations" : [
+
+      ],
+      "name" : "Грош Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "1290",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6700000002",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Все функции Pro на год",
+              "displayName" : "Грош Pro — год",
+              "locale" : "ru"
+            }
+          ],
+          "productID" : "grosh.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pro Yearly",
+          "subscriptionGroupID" : "21500001",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "199",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6700000001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Все функции Pro на месяц",
+              "displayName" : "Грош Pro — месяц",
+              "locale" : "ru"
+            }
+          ],
+          "productID" : "grosh.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Monthly",
+          "subscriptionGroupID" : "21500001",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}
