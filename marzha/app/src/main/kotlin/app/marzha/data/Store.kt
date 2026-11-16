@@ -87,6 +87,11 @@ class Store(context: Context) {
         get() = p.getString("loadedTo", null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         set(v) = p.edit().putString("loadedTo", v?.toString()).apply()
 
+    /** Цветовая тема: GREEN или OZON. */
+    var theme: String
+        get() = p.getString("theme", "GREEN") ?: "GREEN"
+        set(v) = p.edit().putString("theme", v).apply()
+
     var lastSync: Long
         get() = p.getLong("lastSync", 0)
         set(v) = p.edit().putLong("lastSync", v).apply()
@@ -108,5 +113,9 @@ class Store(context: Context) {
     /** Ставки хранятся как float; округляем, чтобы 6,3 не превращалось в 6,300000190734863. */
     private fun round2(v: Float): Double = Math.round(v * 100.0) / 100.0
 
-    fun clear() = p.edit().clear().apply()
+    /** Стирает ключи и настройки расчёта; выбранная тема оформления остаётся. */
+    fun clear() {
+        val keep = theme
+        p.edit().clear().putString("theme", keep).apply()
+    }
 }

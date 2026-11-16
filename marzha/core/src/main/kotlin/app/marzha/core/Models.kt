@@ -8,14 +8,30 @@ data class Product(
     val image: String = "",
 )
 
-/** Себестоимость одной штуки, как в листе «Себестоимость»: закупка + маркировка (КИЗ) + упаковка + прочее. */
+/** Своя статья себестоимости на штуку, которую продавец добавил сам: «Пошив бирки», «Фулфилмент» и т. п. */
+data class ExtraCost(val name: String, val amount: Double)
+
+/** Себестоимость одной штуки, как в листе «Себестоимость»: закупка + маркировка (КИЗ) + упаковка + прочее + свои статьи. */
 data class UnitCost(
     val purchase: Double = 0.0,
     val marking: Double = 0.0,
     val packaging: Double = 0.0,
     val other: Double = 0.0,
+    val extras: List<ExtraCost> = emptyList(),
 ) {
-    val total: Double get() = purchase + marking + packaging + other
+    /** Прочее вместе со своими статьями. */
+    val otherTotal: Double get() = other + extras.sumOf { it.amount }
+    val total: Double get() = purchase + marking + packaging + otherTotal
+
+    /** Свои статьи одной строкой для хранения: «название<TAB>сумма», по строке на статью. */
+    fun extrasText(): String = extras.joinToString("\n") { it.name.replace('\t', ' ').replace('\n', ' ') + "\t" + it.amount }
+
+    companion object {
+        fun parseExtras(text: String): List<ExtraCost> = text.split('\n').mapNotNull { line ->
+            val i = line.lastIndexOf('\t')
+            if (i <= 0) null else line.substring(i + 1).toDoubleOrNull()?.let { ExtraCost(line.substring(0, i), it) }
+        }
+    }
 }
 
 /**

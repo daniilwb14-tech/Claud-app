@@ -20,7 +20,6 @@ import app.marzha.core.buildStockReport
 import app.marzha.core.campaigns
 import app.marzha.core.demoData
 import app.marzha.core.describeError
-import app.marzha.data.CostE
 import app.marzha.data.Db
 import app.marzha.data.Store
 import app.marzha.data.Sync
@@ -86,6 +85,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var hasPerf by mutableStateOf(store.hasPerf)
         private set
+    var theme by mutableStateOf(store.theme)
+        private set
+
+    fun chooseTheme(name: String) {
+        store.theme = name
+        theme = name
+    }
 
     private var recomputeJob: Job? = null
 
@@ -221,7 +227,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val d = demoData(today)
                 db.withTransaction {
                     dao.putProducts(d.products.map { it.toE() })
-                    dao.putCosts(d.costs.map { (sku, c) -> CostE(sku, c.purchase, c.marking, c.packaging, c.other) })
+                    dao.putCosts(d.costs.map { (sku, c) -> c.toE(sku) })
                     dao.putFin(d.fin.map { it.toE() })
                     dao.putOrders(d.orders.map { it.toE() })
                     dao.putStocks(d.stocks.map { it.toE() })
@@ -273,7 +279,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCost(skus: Collection<Long>, cost: UnitCost) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                dao.putCosts(skus.map { CostE(it, cost.purchase, cost.marking, cost.packaging, cost.other) })
+                dao.putCosts(skus.map { cost.toE(it) })
             }
             recompute()
         }

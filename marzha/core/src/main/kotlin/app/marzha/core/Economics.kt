@@ -93,7 +93,38 @@ data class SkuReport(
     val points: Double get() = b.revenue - customerPaid
 }
 
-data class DayPoint(val date: String, val revenue: Double, val profit: Double, val orderedQty: Int, val soldQty: Int)
+data class DayPoint(
+    val date: String,
+    val revenue: Double,
+    val profit: Double,
+    val orderedQty: Int,
+    val soldQty: Int,
+    val orderedSum: Double = 0.0,
+    /** Удержания Ozon за день (отрицательное). */
+    val ozon: Double = 0.0,
+) {
+    /** Начислено к выплате за день. */
+    val payout: Double get() = revenue + ozon
+
+    operator fun plus(o: DayPoint) = DayPoint(
+        date, revenue + o.revenue, profit + o.profit, orderedQty + o.orderedQty, soldQty + o.soldQty,
+        orderedSum + o.orderedSum, ozon + o.ozon,
+    )
+}
+
+enum class Grouping { DAY, WEEK, MONTH }
+
+/** Сворачивает точки по дням в недели (с понедельника) или месяцы; дата точки — первый день отрезка в периоде. */
+fun groupPoints(points: List<DayPoint>, by: Grouping): List<DayPoint> {
+    if (by == Grouping.DAY) return points
+    val out = LinkedHashMap<String, DayPoint>()
+    for (p in points) {
+        val d = LocalDate.parse(p.date)
+        val key = if (by == Grouping.WEEK) d.minusDays(d.dayOfWeek.value - 1L).toString() else p.date.substring(0, 7)
+        out[key] = out[key]?.plus(p) ?: p
+    }
+    return out.values.toList()
+}
 
 data class Report(
     val from: LocalDate,
@@ -166,7 +197,7 @@ fun buildReport(
         val base = if (settings.taxBase == TaxBase.CUSTOMER_PAID) r.customerPaid else r.revenue
         return Breakdown(
             purchase = -net * c.purchase, marking = -net * c.marking,
-            packaging = -net * c.packaging, otherCost = -net * c.other,
+            packaging = -net * c.packaging, otherCost = -net * c.otherTotal,
             tax = -taxRate * max(0.0, base), manager = -mgrRate * max(0.0, r.revenue),
         )
     }
@@ -215,9 +246,11 @@ fun buildReport(
         val rows = finByDate[key].orEmpty()
         var b = Breakdown(fixed = -expensePerDay(expenses, d))
         for (r in rows) b = b + r.toBreakdown() + if (r.sku != 0L) own(r.sku, r) else Breakdown()
+        val ord = ordByDate[key].orEmpty()
         daily += DayPoint(
             key, b.revenue, b.profit,
-            ordByDate[key].orEmpty().sumOf { it.orderedQty }, rows.sumOf { it.soldQty - it.returnQty },
+            ord.sumOf { it.orderedQty }, rows.sumOf { it.soldQty - it.returnQty },
+            ord.sumOf { it.orderedSum }, b.ozon,
         )
         d = d.plusDays(1)
     }
@@ -243,6 +276,8 @@ data class StockLine(
     /** Сколько докупить, чтобы хватило на целевое число дней. */
     val toBuy: Int,
     val hasCost: Boolean,
+    /** Сколько выручки даст остаток по средней цене продажи. */
+    val expectedRevenue: Double = 0.0,
 )
 
 data class StockReport(
@@ -252,6 +287,8 @@ data class StockReport(
     val expectedProfit: Double,
     val toBuyUnits: Int,
     val toBuySum: Double,
+    /** Выручка, если продать весь остаток по текущим средним ценам. */
+    val expectedRevenue: Double = 0.0,
 )
 
 /**
@@ -282,6 +319,7 @@ fun buildStockReport(
             expectedProfit = s.total * (line?.profitPerUnit ?: 0.0),
             toBuy = max(0, need),
             hasCost = cost > 0,
+            expectedRevenue = s.total * (line?.avgPrice ?: 0.0),
         )
     }.sortedByDescending { it.invested.takeIf { v -> abs(v) > 0 } ?: it.stock.total.toDouble() / 1e6 }
     return StockReport(
@@ -291,6 +329,7 @@ fun buildStockReport(
         expectedProfit = lines.sumOf { it.expectedProfit },
         toBuyUnits = lines.sumOf { it.toBuy },
         toBuySum = lines.sumOf { it.toBuy * (costs[it.sku]?.total ?: 0.0) },
+        expectedRevenue = lines.sumOf { it.expectedRevenue },
     )
 }
 

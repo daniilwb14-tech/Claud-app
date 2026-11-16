@@ -21,8 +21,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,7 +34,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MarzhaTheme {
+            MarzhaTheme(AppTheme.of(vm.theme)) {
+                val bar = LocalPalette.current.heroFrom.toArgb()
+                SideEffect {
+                    window.statusBarColor = bar
+                    window.navigationBarColor = bar
+                }
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (vm.connected) Main(vm) else Onboarding(vm)
                 }
@@ -46,10 +51,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Main(vm: AppViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    // Экран поверх вкладок: 0 — нет, −1 — реклама, иначе SKU открытого товара.
+    // Экран поверх вкладок: 0 — нет, −1 — реклама, −2 — выплаты, иначе SKU открытого товара.
     var overlay by rememberSaveable { mutableLongStateOf(0L) }
+    // Откуда открыли товар: чтобы «назад» из карточки возвращал в рекламу, а не на вкладку.
+    var under by rememberSaveable { mutableLongStateOf(0L) }
+    var productSort by rememberSaveable { mutableStateOf(ProductSort.PROFIT) }
+    fun closeOverlay() {
+        overlay = if (overlay > 0L) under else 0L
+        under = 0L
+    }
     BackHandler(enabled = overlay != 0L || tab != 0) {
-        if (overlay != 0L) overlay = 0L else tab = 0
+        if (overlay != 0L) closeOverlay() else tab = 0
     }
 
     Scaffold(
@@ -65,7 +77,7 @@ private fun Main(vm: AppViewModel) {
                 tabs.forEachIndexed { i, (title, icon) ->
                     NavigationBarItem(
                         selected = tab == i && overlay == 0L,
-                        onClick = { tab = i; overlay = 0L },
+                        onClick = { tab = i; overlay = 0L; under = 0L },
                         icon = { Icon(icon, contentDescription = null) },
                         label = { Text(title) },
                     )
@@ -75,10 +87,18 @@ private fun Main(vm: AppViewModel) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
-                overlay == -1L -> AdsScreen(vm, back = { overlay = 0L })
-                overlay != 0L -> ProductDetailScreen(vm, overlay, back = { overlay = 0L })
-                tab == 0 -> DashboardScreen(vm, openProduct = { overlay = it }, openProducts = { tab = 1 }, openAds = { overlay = -1L })
-                tab == 1 -> ProductsScreen(vm, openProduct = { overlay = it })
+                overlay == -1L -> AdsScreen(vm, back = { closeOverlay() }, openProduct = { under = -1L; overlay = it })
+                overlay == -2L -> PayoutScreen(vm, back = { closeOverlay() })
+                overlay != 0L -> ProductDetailScreen(vm, overlay, back = { closeOverlay() })
+                tab == 0 -> DashboardScreen(
+                    vm,
+                    openProduct = { overlay = it },
+                    openProducts = { productSort = it; tab = 1 },
+                    openAds = { overlay = -1L },
+                    openPayout = { overlay = -2L },
+                    openSettings = { tab = 3 },
+                )
+                tab == 1 -> ProductsScreen(vm, productSort, { productSort = it }, openProduct = { overlay = it })
                 tab == 2 -> StocksScreen(vm, openProduct = { overlay = it })
                 else -> MoreScreen(vm, openAds = { overlay = -1L })
             }
@@ -92,7 +112,7 @@ private fun Onboarding(vm: AppViewModel) {
         Box(
             Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF0B6E5B), Color(0xFF0A4F5E))))
+                .background(heroBrush())
                 .padding(horizontal = 24.dp, vertical = 36.dp)
         ) {
             Column {
@@ -107,7 +127,7 @@ private fun Onboarding(vm: AppViewModel) {
                     "Себестоимость, налог и свои расходы — ваши",
                 )) {
                     Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
-                        Text("•", color = Color(0xFFFFD166), fontWeight = FontWeight.Bold)
+                        Text("•", color = LocalPalette.current.accent, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(8.dp))
                         Text(line, color = Color.White.copy(alpha = 0.92f), style = MaterialTheme.typography.bodyMedium)
                     }

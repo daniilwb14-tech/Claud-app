@@ -232,6 +232,7 @@ class CoreTest {
         near(l.expectedProfit, 30 * 400.0)
         assertEquals(30, l.toBuy)
         near(st.toBuySum, 3000.0)
+        near(st.expectedRevenue, 30 * 1000.0)
     }
 
     @Test
@@ -244,6 +245,22 @@ class CoreTest {
         near(r.daily.sumOf { it.profit }, r.total.b.profit, 1.0)
         assertEquals(1, r.missingCost)
         assertTrue(campaigns(d.ads, today.minusDays(7), today.minusDays(1)).size == 4)
+    }
+
+    @Test
+    fun extrasAndGrouping() {
+        val c = UnitCost(100.0, 5.0, 10.0, 2.0, listOf(ExtraCost("Бирка", 3.5), ExtraCost("Фулфилмент", 20.0)))
+        near(c.total, 140.5)
+        assertEquals(c.extras, UnitCost.parseExtras(c.extrasText()))
+        assertTrue(UnitCost.parseExtras("").isEmpty())
+        val fin = listOf(FinDay("2026-11-03", 1, soldQty = 2, sales = 2000.0))
+        val r = buildReport(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 30), fin, emptyList(), emptyMap(), mapOf(1L to c), emptyList(), EconSettings(taxPct = 0.0))
+        near(r.total.b.otherCost, -2 * 25.5)
+        // 1 ноября 2026 — воскресенье: 30 дней ложатся в 6 недель и один месяц.
+        assertEquals(6, groupPoints(r.daily, Grouping.WEEK).size)
+        val month = groupPoints(r.daily, Grouping.MONTH).single()
+        near(month.revenue, 2000.0)
+        near(month.payout, 2000.0)
     }
 
     @Test

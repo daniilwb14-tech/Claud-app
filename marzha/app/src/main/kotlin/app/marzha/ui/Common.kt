@@ -3,6 +3,7 @@ package app.marzha.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -11,14 +12,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -26,7 +31,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.marzha.Period
-import app.marzha.core.DayPoint
 import app.marzha.core.Product
 import coil.compose.AsyncImage
 import java.text.DecimalFormat
@@ -38,17 +42,33 @@ import kotlin.math.max
 
 // ───────────────────────── Цвета ─────────────────────────
 
-val Green = Color(0xFF0B6E5B)
-val GreenDark = Color(0xFF0B5D4D)
-private val ProfitLight = Color(0xFF0E8F5B)
-private val LossLight = Color(0xFFD13A3A)
-private val WarnLight = Color(0xFFB26A00)
-private val ProfitDark = Color(0xFF6FD9B8)
-private val LossDark = Color(0xFFFF8A80)
-private val WarnDark = Color(0xFFFFC56B)
+/** Смысловые цвета темы, которых нет в Material: прибыль, убыток, предупреждение, фон главной плашки. */
+class Palette(
+    val profit: Color,
+    val loss: Color,
+    val warn: Color,
+    val heroFrom: Color,
+    val heroTo: Color,
+    val accent: Color,
+    val bars: Color,
+)
 
-private val LightColors = lightColorScheme(
-    primary = Green, onPrimary = Color.White,
+val LocalPalette = staticCompositionLocalOf {
+    Palette(Color(0xFF0E8F5B), Color(0xFFD13A3A), Color(0xFFB26A00), Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), Color(0xFF0B6E5B))
+}
+
+/** Цветовые темы приложения. */
+enum class AppTheme(val title: String, val swatch: List<Color>) {
+    GREEN("Зелёная", listOf(Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166))),
+    OZON("Сине-розовая", listOf(Color(0xFF005BFF), Color(0xFFF91155), Color(0xFF001A34)));
+
+    companion object {
+        fun of(name: String): AppTheme = entries.firstOrNull { it.name == name } ?: GREEN
+    }
+}
+
+private val GreenLight = lightColorScheme(
+    primary = Color(0xFF0B6E5B), onPrimary = Color.White,
     primaryContainer = Color(0xFFD6F2E8), onPrimaryContainer = Color(0xFF00382D),
     secondaryContainer = Color(0xFFD6F2E8), onSecondaryContainer = Color(0xFF00382D),
     background = Color(0xFFF4F6F3), onBackground = Color(0xFF171D1A),
@@ -56,11 +76,11 @@ private val LightColors = lightColorScheme(
     surfaceVariant = Color(0xFFE9EEEA), onSurfaceVariant = Color(0xFF5C6A64),
     surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFEFF3F0), surfaceContainerHighest = Color(0xFFE9EEEA),
     outline = Color(0xFFB9C4BE), outlineVariant = Color(0xFFDCE3DE),
-    error = LossLight,
+    error = Color(0xFFD13A3A),
 )
 
-private val DarkColors = darkColorScheme(
-    primary = ProfitDark, onPrimary = Color(0xFF00382D),
+private val GreenDark = darkColorScheme(
+    primary = Color(0xFF6FD9B8), onPrimary = Color(0xFF00382D),
     primaryContainer = Color(0xFF0B5D4D), onPrimaryContainer = Color(0xFFD6F2E8),
     secondaryContainer = Color(0xFF1F3B33), onSecondaryContainer = Color(0xFFD6F2E8),
     background = Color(0xFF0F1412), onBackground = Color(0xFFE3E9E5),
@@ -68,20 +88,69 @@ private val DarkColors = darkColorScheme(
     surfaceVariant = Color(0xFF232B27), onSurfaceVariant = Color(0xFF9EABA4),
     surfaceContainer = Color(0xFF171D1A), surfaceContainerHigh = Color(0xFF1E2622), surfaceContainerHighest = Color(0xFF232B27),
     outline = Color(0xFF55615B), outlineVariant = Color(0xFF2E3833),
-    error = LossDark,
+    error = Color(0xFFFF8A80),
+)
+
+// Белый фон, почти чёрный текст, синий — основной, розовый — акцент.
+private val OzonLight = lightColorScheme(
+    primary = Color(0xFF005BFF), onPrimary = Color.White,
+    primaryContainer = Color(0xFFDCE8FF), onPrimaryContainer = Color(0xFF001A4D),
+    secondary = Color(0xFFF91155), onSecondary = Color.White,
+    secondaryContainer = Color(0xFFDCE8FF), onSecondaryContainer = Color(0xFF001A4D),
+    tertiary = Color(0xFFF91155), onTertiary = Color.White,
+    background = Color(0xFFF2F5F9), onBackground = Color(0xFF001A34),
+    surface = Color.White, onSurface = Color(0xFF001A34),
+    surfaceVariant = Color(0xFFE8EDF4), onSurfaceVariant = Color(0xFF5B6B7F),
+    surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFEEF2F8), surfaceContainerHighest = Color(0xFFE8EDF4),
+    outline = Color(0xFFB4C0CF), outlineVariant = Color(0xFFDCE3EC),
+    error = Color(0xFFF91155),
+)
+
+private val OzonDark = darkColorScheme(
+    primary = Color(0xFF5C96FF), onPrimary = Color(0xFF001A4D),
+    primaryContainer = Color(0xFF0B3A99), onPrimaryContainer = Color(0xFFDCE8FF),
+    secondary = Color(0xFFFF5C8A), onSecondary = Color(0xFF4A0018),
+    secondaryContainer = Color(0xFF14305F), onSecondaryContainer = Color(0xFFDCE8FF),
+    tertiary = Color(0xFFFF5C8A), onTertiary = Color(0xFF4A0018),
+    background = Color(0xFF05080D), onBackground = Color(0xFFE6ECF5),
+    surface = Color(0xFF0F151E), onSurface = Color(0xFFE6ECF5),
+    surfaceVariant = Color(0xFF1B2430), onSurfaceVariant = Color(0xFF9AA8BA),
+    surfaceContainer = Color(0xFF0F151E), surfaceContainerHigh = Color(0xFF161E29), surfaceContainerHighest = Color(0xFF1B2430),
+    outline = Color(0xFF4C5A6C), outlineVariant = Color(0xFF263140),
+    error = Color(0xFFFF5C8A),
 )
 
 @Composable
-fun MarzhaTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors, content = content)
+fun MarzhaTheme(theme: AppTheme = AppTheme.GREEN, content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val scheme = when (theme) {
+        AppTheme.GREEN -> if (dark) GreenDark else GreenLight
+        AppTheme.OZON -> if (dark) OzonDark else OzonLight
+    }
+    val palette = when (theme) {
+        AppTheme.GREEN ->
+            if (dark) Palette(Color(0xFF6FD9B8), Color(0xFFFF8A80), Color(0xFFFFC56B), Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), Color(0xFF6FD9B8))
+            else Palette(Color(0xFF0E8F5B), Color(0xFFD13A3A), Color(0xFFB26A00), Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), Color(0xFF0B6E5B))
+        AppTheme.OZON ->
+            if (dark) Palette(Color(0xFF4CD08A), Color(0xFFFF5C8A), Color(0xFFFFC56B), Color(0xFF005BFF), Color(0xFF0034B8), Color(0xFFFF5C8A), Color(0xFF5C96FF))
+            else Palette(Color(0xFF00A650), Color(0xFFF91155), Color(0xFFB26A00), Color(0xFF005BFF), Color(0xFF0034B8), Color(0xFFFF7AA2), Color(0xFF005BFF))
+    }
+    CompositionLocalProvider(LocalPalette provides palette) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }
 
+/** Фон главной плашки и первого экрана. */
+@Composable
+@ReadOnlyComposable
+fun heroBrush(): Brush = Brush.linearGradient(listOf(LocalPalette.current.heroFrom, LocalPalette.current.heroTo))
+
 val profitColor: Color
-    @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) ProfitDark else ProfitLight
+    @Composable @ReadOnlyComposable get() = LocalPalette.current.profit
 val lossColor: Color
-    @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) LossDark else LossLight
+    @Composable @ReadOnlyComposable get() = LocalPalette.current.loss
 val warnColor: Color
-    @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) WarnDark else WarnLight
+    @Composable @ReadOnlyComposable get() = LocalPalette.current.warn
 
 @Composable
 @ReadOnlyComposable
@@ -158,10 +227,21 @@ fun Hint(text: String, modifier: Modifier = Modifier) {
 
 /** Плитка показателя. */
 @Composable
-fun Kpi(title: String, value: String, sub: String, modifier: Modifier = Modifier, valueColor: Color = Color.Unspecified) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
+fun Kpi(
+    title: String, value: String, sub: String, modifier: Modifier = Modifier,
+    valueColor: Color = Color.Unspecified, onClick: (() -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Surface(
+        modifier = modifier.clip(shape).let { if (onClick != null) it.clickable(onClick = onClick) else it },
+        shape = shape, color = MaterialTheme.colorScheme.surface,
+    ) {
         Column(Modifier.padding(14.dp)) {
-            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Стрелка подсказывает, что плитку можно открыть.
+                if (onClick != null) Text("›", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            }
             Spacer(Modifier.height(4.dp))
             Text(value, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = valueColor, maxLines = 1)
             if (sub.isNotEmpty()) {
@@ -235,27 +315,38 @@ fun NumberField(label: String, value: String, onChange: (String) -> Unit, modifi
     )
 }
 
-/** Столбики прибыли по дням: зелёные — плюс, красные — минус. */
+/**
+ * Столбики по дням, неделям или месяцам. Положительные значения — основным цветом, отрицательные — цветом убытка.
+ * Нажатие на столбик выбирает его: значение показывается над графиком.
+ */
 @Composable
-fun ProfitBars(points: List<DayPoint>, modifier: Modifier = Modifier) {
-    val up = profitColor
+fun BarChart(values: List<Double>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, signed: Boolean = false) {
+    val up = if (signed) profitColor else LocalPalette.current.bars
     val down = lossColor
     val axis = MaterialTheme.colorScheme.outlineVariant
-    Canvas(modifier) {
-        if (points.isEmpty()) return@Canvas
-        val maxUp = max(points.maxOf { it.profit }, 0.0)
-        val maxDown = max(-points.minOf { it.profit }, 0.0)
+    val count = values.size
+    Canvas(
+        modifier.pointerInput(count) {
+            detectTapGestures { pos ->
+                if (count > 0) onSelect((pos.x / (size.width.toFloat() / count)).toInt().coerceIn(0, count - 1))
+            }
+        }
+    ) {
+        if (values.isEmpty()) return@Canvas
+        val maxUp = max(values.max(), 0.0)
+        val maxDown = max(-values.min(), 0.0)
         val span = (maxUp + maxDown).takeIf { it > 0 } ?: 1.0
         val zeroY = (size.height * (maxUp / span)).toFloat()
-        val step = size.width / points.size
-        val barW = (step * 0.68f).coerceAtMost(28.dp.toPx())
-        val r = CornerRadius(barW / 4, barW / 4)
-        for ((i, p) in points.withIndex()) {
-            val h = (size.height * (abs(p.profit) / span)).toFloat().coerceAtLeast(if (p.profit != 0.0) 2f else 0f)
+        val step = size.width / values.size
+        val barW = (step * 0.68f).coerceAtMost(34.dp.toPx())
+        val r = CornerRadius(barW / 5, barW / 5)
+        for ((i, v) in values.withIndex()) {
+            val h = (size.height * (abs(v) / span)).toFloat().coerceAtLeast(if (v != 0.0) 2f else 0f)
             val x = i * step + (step - barW) / 2
+            val base = if (v >= 0) up else down
             drawRoundRect(
-                color = if (p.profit >= 0) up else down,
-                topLeft = Offset(x, if (p.profit >= 0) zeroY - h else zeroY),
+                color = if (selected < 0 || i == selected) base else base.copy(alpha = 0.35f),
+                topLeft = Offset(x, if (v >= 0) zeroY - h else zeroY),
                 size = Size(barW, h), cornerRadius = r,
             )
         }

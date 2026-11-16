@@ -1,6 +1,7 @@
 package app.marzha.data
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -10,6 +11,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import app.marzha.core.AdDay
 import app.marzha.core.Expense
 import app.marzha.core.ExpenseKind
@@ -23,7 +26,11 @@ import app.marzha.core.UnitCost
 data class ProductE(@PrimaryKey val sku: Long, val offerId: String, val name: String, val image: String)
 
 @Entity(tableName = "cost")
-data class CostE(@PrimaryKey val sku: Long, val purchase: Double, val marking: Double, val packaging: Double, val other: Double)
+data class CostE(
+    @PrimaryKey val sku: Long, val purchase: Double, val marking: Double, val packaging: Double, val other: Double,
+    /** Свои статьи себестоимости: «название<TAB>сумма», по строке на статью. */
+    @ColumnInfo(defaultValue = "") val extras: String = "",
+)
 
 @Entity(tableName = "fin", primaryKeys = ["date", "sku"])
 data class FinE(
@@ -49,7 +56,8 @@ data class AdE(
 
 fun ProductE.toCore() = Product(sku, offerId, name, image)
 fun Product.toE() = ProductE(sku, offerId, name, image)
-fun CostE.toCore() = UnitCost(purchase, marking, packaging, other)
+fun CostE.toCore() = UnitCost(purchase, marking, packaging, other, UnitCost.parseExtras(extras))
+fun UnitCost.toE(sku: Long) = CostE(sku, purchase, marking, packaging, other, extrasText())
 fun FinE.toCore() = FinDay(date, sku, soldQty, returnQty, sales, returns, customerPaid, commission, logistics, returnLogistics, ads, storage, acquiring, crossdock, other)
 fun FinDay.toE() = FinE(date, sku, soldQty, returnQty, sales, returns, customerPaid, commission, logistics, returnLogistics, ads, storage, acquiring, crossdock, other)
 fun OrderE.toCore() = OrderDay(date, sku, orderedQty, orderedSum, cancelledQty)
@@ -94,7 +102,7 @@ interface AppDao {
 
 @Database(
     entities = [ProductE::class, CostE::class, FinE::class, OrderE::class, StockE::class, ExpenseE::class, AdE::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class Db : RoomDatabase() {
@@ -104,8 +112,16 @@ abstract class Db : RoomDatabase() {
         @Volatile
         private var instance: Db? = null
 
+        /** Версия 2: свои статьи себестоимости. Введённые данные сохраняются. */
+        private val migration1to2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cost ADD COLUMN extras TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): Db = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, Db::class.java, "marzha.db")
+                .addMigrations(migration1to2)
                 .fallbackToDestructiveMigration()
                 .build().also { instance = it }
         }

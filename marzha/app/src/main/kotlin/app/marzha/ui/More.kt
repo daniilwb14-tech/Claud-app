@@ -2,10 +2,14 @@ package app.marzha.ui
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -15,6 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -37,6 +43,32 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Настройки", Modifier.padding(start = 4.dp, top = 16.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+
+        // ── Оформление ──
+        item { SectionTitle("Цветовая гамма") }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (t in AppTheme.entries) {
+                    val selected = vm.theme == t.name
+                    Surface(
+                        onClick = { vm.chooseTheme(t.name) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(2.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for (c in t.swatch) Box(Modifier.size(22.dp).clip(CircleShape).background(c))
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text(t.title, fontWeight = FontWeight.Medium)
+                            Hint(if (selected) "выбрана" else "нажмите, чтобы включить")
+                        }
+                    }
+                }
+            }
+        }
 
         // ── Налог и ставки ──
         item { SectionTitle("Налог и ставки") }
@@ -127,8 +159,8 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
                 )
             }
         }
-        if (vm.campaignLines.isNotEmpty()) item {
-            Panel(onClick = openAds) { Text("Рекламные кампании за период", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary) }
+        item {
+            Panel(onClick = openAds) { Text("Реклама по товарам и кампаниям", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary) }
         }
 
         // ── Данные ──
@@ -147,15 +179,12 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
             }
         }
 
-        item { SectionTitle("Как считается прибыль") }
-        item {
+        item { SectionTitle("Как всё считается") }
+        items(formulas) { (title, text) ->
             Panel {
-                Hint(
-                    "Выкупы и удержания берутся по дате начисления Ozon (Финансы → Начисления), поэтому сумма сходится с личным кабинетом.\n\n" +
-                        "Чистая прибыль = выкуплено − возвраты − комиссия, логистика, реклама и прочие начисления Ozon − себестоимость проданного (закупка, маркировка, упаковка) − налог − менеджер − свои расходы.\n\n" +
-                        "Начисления без привязки к товару (хранение, кросс-докинг, реклама кабинета) и свои расходы делятся между товарами по доле выкупов.\n\n" +
-                        "Заказы считаются по дате оформления и нужны для ДРР и доли выкупа. Остатки: склады Ozon, свой склад, поставки в пути и возвраты, которые едут обратно на склад."
-                )
+                Text(title, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -173,6 +202,85 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
         dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Отмена") } },
     )
 }
+
+/** Формулы всех показателей — чтобы было видно, что из чего получается. */
+private val formulas: List<Pair<String, String>> = listOf(
+    "Откуда данные" to
+        "Выкупы, возвраты и все удержания берутся из начислений Ozon (Финансы → Начисления) по дате начисления, " +
+        "поэтому суммы сходятся с личным кабинетом. Заказы — из списка отправлений FBO и FBS по дате оформления, " +
+        "время московское. Остатки — из карточек товаров и аналитики остатков. " +
+        "Себестоимость, налог, процент менеджера и свои расходы вводите вы.",
+    "Выкуплено" to
+        "Выкуплено, ₽ = сумма продаж − сумма возвратов за период (с баллами Ozon).\n" +
+        "Выкуплено, шт = проданные штуки − возвращённые штуки.\n" +
+        "Средний чек = выкуплено, ₽ ÷ выкуплено, шт.",
+    "Оплатили клиенты и баллы Ozon" to
+        "Оплатили клиенты = выкуплено, ₽ − баллы за скидки − соинвестирование Ozon.\n" +
+        "Баллы Ozon = выкуплено, ₽ − оплатили клиенты.\n" +
+        "Это та часть цены, которую покупатель не платил: её доплатил вам Ozon.",
+    "Заказано и отмены" to
+        "Заказано, шт и ₽ — все отправления, оформленные за период, включая отменённые; сумма = цена × количество.\n" +
+        "Отмены — штуки в отправлениях со статусом «отменено».",
+    "Процент выкупа" to
+        "Процент выкупа = выкуплено, шт ÷ заказано, шт за тот же период.\n" +
+        "Это оценка: заказ и его выкуп разделяют несколько дней, поэтому на коротких периодах (сегодня, вчера) " +
+        "цифра неточная. Смотрите её за 30 дней или за месяц.",
+    "Удержания Ozon" to
+        "Каждое начисление Ozon относится к статье по его названию в справочнике Ozon:\n" +
+        "• комиссия — комиссия за продажу с учётом скидок;\n" +
+        "• логистика — доставка до покупателя, магистраль, последняя миля, обработка отправления;\n" +
+        "• обратная логистика — возвраты, отмены, невыкуп;\n" +
+        "• реклама и продвижение — оплата за клик, оплата за заказ, трафареты, бренд-полка, отзывы за баллы;\n" +
+        "• хранение, эквайринг, кросс-докинг — отдельными статьями;\n" +
+        "• прочие начисления — всё остальное.\n" +
+        "Каждое начисление сверяется со своим итогом: если части не сошлись, остаток уходит в «прочие». " +
+        "Так сумма статей всегда равна тому, что начислил Ozon.",
+    "К выплате от Ozon" to
+        "К выплате = выкуплено, ₽ + все удержания Ozon (они отрицательные).\n" +
+        "«Удержано, %» = удержания Ozon ÷ выкуплено, ₽.\n" +
+        "Это начислено, а не переведено на счёт: сами выплаты Ozon делает по своему графику.",
+    "Реклама и ДРР" to
+        "Реклама — сумма рекламных начислений Ozon за период. Реклама, привязанная к товару (оплата за заказ), " +
+        "ложится на этот товар; реклама кабинета без товара делится между товарами по доле выкупов.\n" +
+        "ДРР = реклама ÷ заказано, ₽. Если заказы за период не загружены — реклама ÷ выкуплено, ₽.\n" +
+        "В списке кампаний: ДРР кампании = расход ÷ сумма заказов с рекламы, CTR = клики ÷ показы, " +
+        "цена заказа = расход ÷ заказы.",
+    "Себестоимость" to
+        "Себестоимость 1 шт = закупка + маркировка (КИЗ) + упаковка + прочее + ваши собственные статьи.\n" +
+        "Себестоимость за период = себестоимость 1 шт × выкуплено, шт (за вычетом возвратов).\n" +
+        "Если себестоимость не указана, она считается нулевой и прибыль по товару завышена — " +
+        "такие товары помечены.",
+    "Налог" to
+        "Налог = ставка × налоговая база.\n" +
+        "База «со всех выкупов» = выкуплено, ₽. База «только с оплаты клиента» = оплатили клиенты, ₽ " +
+        "(без баллов и скидок за счёт Ozon). Отрицательная база считается нулём.",
+    "Менеджер и свои расходы" to
+        "Менеджер = процент × выкуплено, ₽.\n" +
+        "Свои расходы: ежемесячный делится на число дней месяца, еженедельный — на 7, и берётся столько дней, " +
+        "сколько в периоде; разовый учитывается целиком в день своей даты.\n" +
+        "Свои расходы и начисления Ozon без товара (хранение, кросс-докинг, реклама кабинета) делятся между " +
+        "товарами по доле в выкупах: доля товара = его выкуп, ₽ ÷ общий выкуп, ₽.",
+    "Чистая прибыль" to
+        "Чистая прибыль = выкуплено, ₽ − удержания Ozon − себестоимость − налог − менеджер − свои расходы.\n" +
+        "Маржа = чистая прибыль ÷ выкуплено, ₽.\n" +
+        "Прибыль на 1 шт = чистая прибыль ÷ выкуплено, шт.\n" +
+        "На вложенный рубль = чистая прибыль ÷ себестоимость проданного.",
+    "Остатки" to
+        "Остаток = склады Ozon + свой склад (FBS) + в пути на склад (поставки и заявки) + возвраты от покупателей, " +
+        "которые едут обратно на склад и снова пойдут в продажу.\n" +
+        "Вложено в товар = остаток × себестоимость 1 шт.\n" +
+        "Продаж в день = выкуплено, шт за последние 30 дней ÷ 30.\n" +
+        "Хватит на = остаток ÷ продаж в день.\n" +
+        "Выручка, если продать всё = остаток × средний чек за 30 дней.\n" +
+        "Принесёт чистой прибыли = остаток × прибыль на 1 шт за 30 дней.\n" +
+        "Докупить = продаж в день × целевой запас в днях − остаток (если больше нуля).\n" +
+        "Цвета: красный — хватит меньше чем на 7 дней, жёлтый — меньше чем на 14, зелёный — запас есть, " +
+        "синий — больше 90 дней, серый — продаж нет.",
+    "Периоды" to
+        "«7 дней» и «30 дней» — полные дни до вчерашнего включительно. «Этот месяц» — с 1-го числа по сегодня. " +
+        "Сегодняшние начисления Ozon неполные и дополняются в течение нескольких дней, поэтому три последних дня " +
+        "при каждом обновлении загружаются заново.",
+)
 
 private fun shareCsv(context: Context, csv: String) {
     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -284,24 +392,51 @@ private fun PerfDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) 
 }
 
 @Composable
-fun AdsScreen(vm: AppViewModel, back: () -> Unit) {
+private fun ScreenHeader(title: String, back: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** Реклама: расходы по товарам (из начислений) и, если подключён Performance API, по кампаниям. */
+@Composable
+fun AdsScreen(vm: AppViewModel, back: () -> Unit, openProduct: (Long) -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
-            Text("Рекламные кампании", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        }
+        ScreenHeader("Реклама", back)
         PeriodChips(vm.period, vm::choosePeriod)
+        val report = vm.report
+        val products = report?.lines.orEmpty().filter { it.sku != 0L && it.b.ads < -0.5 }.sortedBy { it.b.ads }
+        val campaigns = vm.campaignLines
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val lines = vm.campaignLines
-            if (lines.isNotEmpty()) item {
-                val spent = lines.sumOf { it.spent }
-                val sum = lines.sumOf { it.ordersSum }
+            if (report != null) item {
+                val t = report.total
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Kpi("Расход", rubShort(spent), "${lines.size} кампаний", Modifier.weight(1f))
-                    Kpi("Заказы с рекламы", rubShort(sum), "ДРР ${pct(if (sum > 0) spent / sum else 0.0)}", Modifier.weight(1f))
+                    Kpi("Потрачено на рекламу", rubShort(-t.b.ads), if (t.b.revenue > 0) "${pct(-t.b.ads / t.b.revenue)} от выкупов" else "", Modifier.weight(1f))
+                    Kpi("ДРР", pct(t.drr), "реклама к сумме заказов", Modifier.weight(1f))
                 }
             }
-            items(lines, key = { it.id }) { c ->
+            if (products.isNotEmpty()) {
+                item { SectionTitle("По товарам") }
+                item {
+                    Panel {
+                        products.forEach { l -> ProductRow(l, ProductSort.ADS, onClick = { openProduct(l.sku) }) }
+                        Hint("Реклама кабинета без привязки к товару разделена между товарами по доле выкупов.", Modifier.padding(top = 6.dp))
+                    }
+                }
+            } else item { Panel { Hint("За период рекламных начислений нет.") } }
+
+            item { SectionTitle("По кампаниям") }
+            if (campaigns.isEmpty()) item {
+                Panel {
+                    Hint(
+                        if (vm.hasPerf || vm.demo) "За период кампаний нет."
+                        else "Показы, клики и ДРР по каждой кампании появятся, если добавить ключ Performance API в настройках. " +
+                            "Сами расходы на рекламу уже учтены выше — они берутся из начислений."
+                    )
+                }
+            }
+            items(campaigns, key = { it.id }) { c ->
                 Panel {
                     Text(c.title.ifEmpty { "Кампания ${c.id}" }, fontWeight = FontWeight.SemiBold)
                     Hint("ID ${c.id}")
@@ -312,7 +447,49 @@ fun AdsScreen(vm: AppViewModel, back: () -> Unit) {
                     Line("ДРР", pct(c.drr), valueColor = if (c.drr > 0.15) lossColor else profitColor)
                 }
             }
-            if (lines.isEmpty()) item { Hint("За период кампаний нет.", Modifier.padding(24.dp)) }
+        }
+    }
+}
+
+/** Начисления к выплате: из чего складывается сумма и как она набиралась по дням. */
+@Composable
+fun PayoutScreen(vm: AppViewModel, back: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("К выплате от Ozon", back)
+        PeriodChips(vm.period, vm::choosePeriod)
+        val report = vm.report
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (report == null) return@LazyColumn
+            val t = report.total
+            val b = t.b
+            item {
+                Panel {
+                    Text("Из чего складывается", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Line("Выкуплено", rub(b.revenue), bold = true, sub = "оплатили клиенты ${rub(t.customerPaid)} · баллы Ozon ${rub(t.points)}")
+                    for ((label, v) in listOf(
+                        "Комиссия Ozon" to b.commission, "Логистика" to b.logistics, "Обратная логистика" to b.returnLogistics,
+                        "Реклама и продвижение" to b.ads, "Хранение" to b.storage, "Эквайринг" to b.acquiring,
+                        "Кросс-докинг" to b.crossdock, "Прочие начисления" to b.otherOzon,
+                    )) {
+                        if (kotlin.math.abs(v) >= 0.5) Line(label, rub(v), sub = if (b.revenue > 0) pct(-v / b.revenue) + " от выкупов" else "")
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Line("К выплате", rub(b.payout), valueColor = signColor(b.payout), bold = true, sub = if (b.revenue > 0) "остаётся ${pct(b.payout / b.revenue)} от выкупов" else "")
+                    Hint("Это начислено Ozon за период, а не переведено на счёт: выплаты Ozon делает по своему графику.", Modifier.padding(top = 6.dp))
+                }
+            }
+            val days = report.daily.filter { it.revenue != 0.0 || it.ozon != 0.0 }.reversed()
+            if (days.isNotEmpty()) {
+                item { SectionTitle("По дням") }
+                item {
+                    Panel {
+                        days.forEach { d ->
+                            Line(dayMonth(d.date), rub(d.payout), valueColor = signColor(d.payout), sub = "выкуплено ${rub(d.revenue)} · удержано ${rub(-d.ozon)}")
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -8,11 +8,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.marzha.AppViewModel
 import app.marzha.core.Breakdown
+import app.marzha.core.DayPoint
+import app.marzha.core.Grouping
+import app.marzha.core.groupPoints
 import app.marzha.core.Report
 import app.marzha.core.SkuReport
 import java.text.SimpleDateFormat
@@ -46,7 +49,14 @@ fun costRows(b: Breakdown): List<Pair<String, Double>> = listOf(
 ).filter { kotlin.math.abs(it.second) >= 0.5 }
 
 @Composable
-fun DashboardScreen(vm: AppViewModel, openProduct: (Long) -> Unit, openProducts: () -> Unit, openAds: () -> Unit) {
+fun DashboardScreen(
+    vm: AppViewModel,
+    openProduct: (Long) -> Unit,
+    openProducts: (ProductSort) -> Unit,
+    openAds: () -> Unit,
+    openPayout: () -> Unit,
+    openSettings: () -> Unit,
+) {
     val report = vm.report
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -115,7 +125,7 @@ fun DashboardScreen(vm: AppViewModel, openProduct: (Long) -> Unit, openProducts:
         item { ProfitHero(report, Modifier.padding(horizontal = 16.dp)) }
 
         if (report.missingCost > 0) item {
-            Panel(Modifier.padding(horizontal = 16.dp), onClick = openProducts) {
+            Panel(Modifier.padding(horizontal = 16.dp), onClick = { openProducts(ProductSort.NO_COST) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Warning, contentDescription = null, tint = warnColor)
                     Spacer(Modifier.width(10.dp))
@@ -127,33 +137,11 @@ fun DashboardScreen(vm: AppViewModel, openProduct: (Long) -> Unit, openProducts:
             }
         }
 
-        item { KpiGrid(report, Modifier.padding(horizontal = 16.dp)) }
+        item { KpiGrid(report, Modifier.padding(horizontal = 16.dp), openProducts, openAds, openPayout, openSettings) }
 
-        if (report.daily.size > 1) item {
-            Panel(Modifier.padding(horizontal = 16.dp)) {
-                Text("Прибыль по дням", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(12.dp))
-                ProfitBars(report.daily, Modifier.fillMaxWidth().height(120.dp))
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    Hint(dayMonth(report.from), Modifier.weight(1f))
-                    Hint(dayMonth(report.to))
-                }
-            }
-        }
+        if (report.daily.size > 1) item { SalesChart(report, Modifier.padding(horizontal = 16.dp)) }
 
         item { CostStructure(report.total, Modifier.padding(horizontal = 16.dp)) }
-
-        if (vm.campaignLines.isNotEmpty()) item {
-            Panel(Modifier.padding(horizontal = 16.dp), onClick = openAds) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Рекламные кампании", fontWeight = FontWeight.SemiBold)
-                        Hint("${vm.campaignLines.size} кампаний · расход ${rub(vm.campaignLines.sumOf { it.spent })}")
-                    }
-                    Text("Открыть", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
 
         val sold = report.lines.filter { it.sku != 0L && (it.netQty != 0 || it.b.profit != 0.0) }
         if (sold.isNotEmpty()) {
@@ -161,7 +149,7 @@ fun DashboardScreen(vm: AppViewModel, openProduct: (Long) -> Unit, openProducts:
             item {
                 Panel(Modifier.padding(horizontal = 16.dp)) {
                     sold.take(5).forEach { ProductRow(it, onClick = { openProduct(it.sku) }) }
-                    TextButton(onClick = openProducts, modifier = Modifier.align(Alignment.End)) { Text("Все товары") }
+                    TextButton(onClick = { openProducts(ProductSort.PROFIT) }, modifier = Modifier.align(Alignment.End)) { Text("Все товары") }
                 }
             }
             val losers = sold.filter { it.b.profit < -0.5 }.sortedBy { it.b.profit }.take(3)
@@ -187,7 +175,7 @@ private fun ProfitHero(r: Report, modifier: Modifier = Modifier) {
     val t = r.total
     Box(
         modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF0B6E5B), Color(0xFF0A4F5E))))
+            .background(heroBrush())
             .padding(20.dp)
     ) {
         Column {
@@ -213,21 +201,84 @@ private fun HeroStat(title: String, value: String) {
 }
 
 @Composable
-private fun KpiGrid(r: Report, modifier: Modifier = Modifier) {
+private fun KpiGrid(
+    r: Report, modifier: Modifier, openProducts: (ProductSort) -> Unit,
+    openAds: () -> Unit, openPayout: () -> Unit, openSettings: () -> Unit,
+) {
     val t = r.total
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Kpi("Выкуплено", rubShort(t.b.revenue), "${qty(t.netQty)} шт · возвратов ${qty(t.returnQty)}", Modifier.weight(1f))
-            Kpi("Заказано", rubShort(t.orderedSum), "${qty(t.orderedQty)} шт · отмен ${qty(t.cancelledQty)}", Modifier.weight(1f))
+            Kpi("Выкуплено", rubShort(t.b.revenue), "${qty(t.netQty)} шт · возвратов ${qty(t.returnQty)}", Modifier.weight(1f), onClick = { openProducts(ProductSort.REVENUE) })
+            Kpi("Заказано", rubShort(t.orderedSum), "${qty(t.orderedQty)} шт · отмен ${qty(t.cancelledQty)}", Modifier.weight(1f), onClick = { openProducts(ProductSort.ORDERED) })
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Kpi("Реклама", rubShort(-t.b.ads), "ДРР ${pct(t.drr)}", Modifier.weight(1f))
-            Kpi("К выплате от Ozon", rubShort(t.b.payout), "удержано ${pct(if (t.b.revenue > 0) -t.b.ozon / t.b.revenue else 0.0)}", Modifier.weight(1f))
+            Kpi("Реклама", rubShort(-t.b.ads), "ДРР ${pct(t.drr)}", Modifier.weight(1f), onClick = openAds)
+            Kpi("К выплате от Ozon", rubShort(t.b.payout), "удержано ${pct(if (t.b.revenue > 0) -t.b.ozon / t.b.revenue else 0.0)}", Modifier.weight(1f), onClick = openPayout)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Kpi("Оплатили клиенты", rubShort(t.customerPaid), "баллы Ozon ${rubShort(t.points)}", Modifier.weight(1f))
-            Kpi("Себестоимость", rubShort(-t.b.cogs), "средний чек ${rubUnit(t.avgPrice)}", Modifier.weight(1f))
+            Kpi("Оплатили клиенты", rubShort(t.customerPaid), "баллы Ozon ${rubShort(t.points)}", Modifier.weight(1f), onClick = openPayout)
+            Kpi("Себестоимость", rubShort(-t.b.cogs), "средний чек ${rubUnit(t.avgPrice)}", Modifier.weight(1f), onClick = { openProducts(ProductSort.COGS) })
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Kpi("Процент выкупа", if (t.orderedQty > 0) pct(t.buyout) else "—", "${qty(t.netQty)} из ${qty(t.orderedQty)} шт", Modifier.weight(1f), onClick = { openProducts(ProductSort.BUYOUT) })
+            Kpi("Налог", rubShort(-t.b.tax), if (t.b.revenue > 0) "${pct(-t.b.tax / t.b.revenue)} от выкупов" else "", Modifier.weight(1f), onClick = openSettings)
+        }
+    }
+}
+
+private enum class ChartMetric(val title: String, val money: Boolean) {
+    REVENUE("Выкуплено, ₽", true), ORDERED("Заказано, ₽", true), PROFIT("Прибыль, ₽", true),
+    SOLD_QTY("Выкуплено, шт", false), ORDERED_QTY("Заказано, шт", false)
+}
+
+private val monthNames = listOf("январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
+
+/** График продаж: что показывать и как сворачивать — по дням, неделям или месяцам. */
+@Composable
+private fun SalesChart(r: Report, modifier: Modifier = Modifier) {
+    var metric by rememberSaveable { mutableStateOf(ChartMetric.REVENUE) }
+    var grouping by rememberSaveable { mutableStateOf(Grouping.DAY) }
+    var selected by remember(r.from, r.to, grouping) { mutableIntStateOf(-1) }
+    val points = remember(r, grouping) { groupPoints(r.daily, grouping) }
+    fun value(p: DayPoint): Double = when (metric) {
+        ChartMetric.REVENUE -> p.revenue
+        ChartMetric.ORDERED -> p.orderedSum
+        ChartMetric.PROFIT -> p.profit
+        ChartMetric.SOLD_QTY -> p.soldQty.toDouble()
+        ChartMetric.ORDERED_QTY -> p.orderedQty.toDouble()
+    }
+    fun show(v: Double): String = if (metric.money) rub(v) else "${qty(v.toInt())} шт"
+    fun label(p: DayPoint): String = when (grouping) {
+        Grouping.DAY -> dayMonth(p.date)
+        Grouping.WEEK -> "неделя с ${dayMonth(p.date)}"
+        Grouping.MONTH -> monthNames[p.date.substring(5, 7).toInt() - 1]
+    }
+    val values = points.map(::value)
+    val sel = selected.takeIf { it in points.indices }
+
+    Panel(modifier) {
+        Text("График продаж", fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        ChoiceChips(ChartMetric.entries.map { it to it.title }, metric, { metric = it })
+        ChoiceChips(listOf(Grouping.DAY to "По дням", Grouping.WEEK to "По неделям", Grouping.MONTH to "По месяцам"), grouping, { grouping = it })
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(1f)) {
+                Hint(if (sel != null) label(points[sel]) else "всего за период")
+                Text(show(if (sel != null) values[sel] else values.sum()), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (values.isNotEmpty()) Hint("в среднем ${show(values.sum() / values.size)}")
+        }
+        Spacer(Modifier.height(10.dp))
+        BarChart(
+            values, sel ?: -1, { selected = if (selected == it) -1 else it },
+            Modifier.fillMaxWidth().height(140.dp), signed = metric == ChartMetric.PROFIT,
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Hint(points.firstOrNull()?.let(::label) ?: "", Modifier.weight(1f))
+            Hint(points.lastOrNull()?.let(::label) ?: "")
+        }
+        Hint("Нажмите на столбик, чтобы увидеть значение.", Modifier.padding(top = 4.dp))
     }
 }
 
@@ -254,21 +305,53 @@ fun CostStructure(t: SkuReport, modifier: Modifier = Modifier) {
     }
 }
 
-/** Строка товара в списках: картинка, артикул, выкупы и прибыль. */
+/** Строка товара в списках: слева артикул и выкупы, справа — показатель выбранной сортировки. */
 @Composable
-fun ProductRow(l: SkuReport, onClick: () -> Unit) {
+fun ProductRow(l: SkuReport, mode: ProductSort = ProductSort.PROFIT, onClick: () -> Unit) {
+    val noCost = if (!l.hasCost && l.netQty > 0) " · нет себестоимости" else ""
+    val sub: String
+    val main: String
+    val mainColor: Color
+    val side: String
+    when (mode) {
+        ProductSort.ORDERED -> {
+            sub = "отмен ${qty(l.cancelledQty)} · выкуплено ${qty(l.netQty)} шт"
+            main = "${qty(l.orderedQty)} шт"; mainColor = Color.Unspecified; side = rubShort(l.orderedSum)
+        }
+        ProductSort.BUYOUT -> {
+            sub = "заказано ${qty(l.orderedQty)} · выкуплено ${qty(l.netQty)} шт"
+            main = if (l.orderedQty > 0) pct(l.buyout) else "—"; mainColor = Color.Unspecified; side = "выкуп"
+        }
+        ProductSort.ADS -> {
+            sub = "заказано ${rubShort(l.orderedSum)}"
+            main = rub(-l.b.ads); mainColor = Color.Unspecified; side = "ДРР ${pct(l.drr)}"
+        }
+        ProductSort.REVENUE -> {
+            sub = "${qty(l.netQty)} шт · возвратов ${qty(l.returnQty)}$noCost"
+            main = rub(l.b.revenue); mainColor = Color.Unspecified; side = "прибыль ${rubShort(l.b.profit)}"
+        }
+        ProductSort.COGS -> {
+            sub = "${qty(l.netQty)} шт$noCost"
+            main = rub(-l.b.cogs); mainColor = Color.Unspecified
+            side = if (l.netQty > 0) "${rubUnit(-l.b.cogs / l.netQty)} за шт" else ""
+        }
+        else -> {
+            sub = "${qty(l.netQty)} шт · ${rubShort(l.b.revenue)}$noCost"
+            main = rub(l.b.profit); mainColor = signColor(l.b.profit); side = if (l.b.revenue > 0) pct(l.margin) else ""
+        }
+    }
     Surface(onClick = onClick, color = Color.Transparent) {
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             ProductImage(l.product)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(productTitle(l.product), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Hint("${qty(l.netQty)} шт · ${rubShort(l.b.revenue)}" + if (!l.hasCost && l.netQty > 0) " · нет себестоимости" else "")
+                Hint(sub)
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
-                Text(rub(l.b.profit), fontWeight = FontWeight.SemiBold, color = signColor(l.b.profit))
-                Hint(if (l.b.revenue > 0) pct(l.margin) else "")
+                Text(main, fontWeight = FontWeight.SemiBold, color = mainColor)
+                Hint(side)
             }
         }
     }

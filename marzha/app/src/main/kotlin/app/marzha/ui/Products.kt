@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -17,17 +18,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.marzha.AppViewModel
+import app.marzha.core.ExtraCost
 import app.marzha.core.SkuReport
 import app.marzha.core.UnitCost
 
-private enum class Sort(val title: String) {
-    PROFIT("По прибыли"), REVENUE("По выручке"), MARGIN("По марже"), LOSS("Сначала убыточные"), NO_COST("Без себестоимости")
+/** Сортировка списка товаров; она же определяет, какой показатель виден справа в строке. */
+enum class ProductSort(val title: String) {
+    PROFIT("По прибыли"), REVENUE("По выкупам"), ORDERED("По заказам"), BUYOUT("По % выкупа"), ADS("По рекламе"),
+    MARGIN("По марже"), COGS("По себестоимости"), LOSS("Сначала убыточные"), NO_COST("Без себестоимости")
 }
 
 @Composable
-fun ProductsScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
+fun ProductsScreen(vm: AppViewModel, sort: ProductSort, onSort: (ProductSort) -> Unit, openProduct: (Long) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var sort by rememberSaveable { mutableStateOf(Sort.PROFIT) }
     var bulk by remember { mutableStateOf(false) }
     val report = vm.report
 
@@ -36,11 +39,15 @@ fun ProductsScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
         val all = report?.lines.orEmpty().filter { it.sku != 0L }
             .filter { q.isEmpty() || it.product.offerId.lowercase().contains(q) || it.product.name.lowercase().contains(q) || it.sku.toString().contains(q) }
         when (sort) {
-            Sort.PROFIT -> all.sortedByDescending { it.b.profit }
-            Sort.REVENUE -> all.sortedByDescending { it.b.revenue }
-            Sort.MARGIN -> all.sortedByDescending { if (it.b.revenue > 0) it.margin else -1.0 }
-            Sort.LOSS -> all.sortedBy { it.b.profit }
-            Sort.NO_COST -> all.filter { !it.hasCost }.sortedByDescending { it.b.revenue }
+            ProductSort.PROFIT -> all.sortedByDescending { it.b.profit }
+            ProductSort.REVENUE -> all.sortedByDescending { it.b.revenue }
+            ProductSort.ORDERED -> all.filter { it.orderedQty > 0 }.sortedByDescending { it.orderedSum }
+            ProductSort.BUYOUT -> all.filter { it.orderedQty > 0 }.sortedByDescending { it.buyout }
+            ProductSort.ADS -> all.filter { it.b.ads < -0.5 }.sortedBy { it.b.ads }
+            ProductSort.MARGIN -> all.sortedByDescending { if (it.b.revenue > 0) it.margin else -1.0 }
+            ProductSort.COGS -> all.sortedBy { it.b.cogs }
+            ProductSort.LOSS -> all.sortedBy { it.b.profit }
+            ProductSort.NO_COST -> all.filter { !it.hasCost }.sortedByDescending { it.b.revenue }
         }
     }
 
@@ -55,15 +62,15 @@ fun ProductsScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        ChoiceChips(Sort.entries.map { it to it.title }, sort, { sort = it }, Modifier.padding(horizontal = 16.dp))
+        ChoiceChips(ProductSort.entries.map { it to it.title }, sort, onSort, Modifier.padding(horizontal = 16.dp))
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp)) {
-            if (lines.isNotEmpty() && (query.isNotBlank() || sort == Sort.NO_COST)) item {
+            if (lines.isNotEmpty() && (query.isNotBlank() || sort == ProductSort.NO_COST)) item {
                 TextButton(onClick = { bulk = true }) { Text("Задать себестоимость всем в списке (${lines.size})") }
             }
-            items(lines, key = { it.sku }) { l -> ProductRow(l, onClick = { openProduct(l.sku) }) }
+            items(lines, key = { it.sku }) { l -> ProductRow(l, sort, onClick = { openProduct(l.sku) }) }
             if (lines.isEmpty()) item {
                 Hint(
-                    if (report == null) "Загрузка…" else if (sort == Sort.NO_COST) "У всех товаров указана себестоимость." else "Ничего не найдено за этот период.",
+                    if (report == null) "Загрузка…" else if (sort == ProductSort.NO_COST) "У всех товаров указана себестоимость." else "Ничего не найдено за этот период.",
                     Modifier.padding(24.dp),
                 )
             }
@@ -81,14 +88,19 @@ fun ProductsScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
     )
 }
 
-/** Ввод себестоимости одной штуки. */
+/** Ввод себестоимости одной штуки: четыре постоянные статьи и сколько угодно своих. */
 @Composable
 fun CostDialog(title: String, initial: UnitCost, onDismiss: () -> Unit, onSave: (UnitCost) -> Unit) {
     var purchase by remember { mutableStateOf(fieldNum(initial.purchase)) }
     var marking by remember { mutableStateOf(fieldNum(initial.marking)) }
     var packaging by remember { mutableStateOf(fieldNum(initial.packaging)) }
     var other by remember { mutableStateOf(fieldNum(initial.other)) }
-    val cost = UnitCost(parseNum(purchase), parseNum(marking), parseNum(packaging), parseNum(other))
+    // Свои статьи: пары «название — сумма».
+    val extras = remember { mutableStateListOf<Pair<String, String>>().apply { addAll(initial.extras.map { it.name to fieldNum(it.amount) }) } }
+    val cost = UnitCost(
+        parseNum(purchase), parseNum(marking), parseNum(packaging), parseNum(other),
+        extras.filter { parseNum(it.second) > 0 }.map { ExtraCost(it.first.trim().ifEmpty { "Своя статья" }, parseNum(it.second)) },
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -99,6 +111,21 @@ fun CostDialog(title: String, initial: UnitCost, onDismiss: () -> Unit, onSave: 
                 NumberField("Маркировка (КИЗ)", marking, { marking = it }, Modifier.fillMaxWidth())
                 NumberField("Упаковка", packaging, { packaging = it }, Modifier.fillMaxWidth())
                 NumberField("Прочее (доставка до склада и т. п.)", other, { other = it }, Modifier.fillMaxWidth())
+                extras.forEachIndexed { i, (name, amount) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            name, { extras[i] = it.take(40) to extras[i].second },
+                            label = { Text("Статья") }, singleLine = true, modifier = Modifier.weight(1.3f),
+                        )
+                        NumberField("Сумма", amount, { extras[i] = extras[i].first to it }, Modifier.weight(1f))
+                        IconButton(onClick = { extras.removeAt(i) }) { Icon(Icons.Filled.Close, contentDescription = "Убрать статью") }
+                    }
+                }
+                TextButton(onClick = { extras.add("" to "") }) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Добавить свою статью")
+                }
                 Text("Итого: ${rubUnit(cost.total)}", fontWeight = FontWeight.SemiBold)
             }
         },
@@ -137,14 +164,22 @@ fun ProductDetailScreen(vm: AppViewModel, sku: Long, back: () -> Unit) {
                     Hint("SKU $sku")
                 }
             }
-            Hint("Период: ${vm.period.title.lowercase()}. Меняется на вкладках «Сводка» и «Товары».")
+            Hint("Период: ${vm.period.title.lowercase()}. Меняется на вкладках «Сводка» и «Товары». Нажмите на себестоимость, чтобы изменить её или добавить свою статью расходов.")
 
             Panel(onClick = { edit = true }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Себестоимость 1 шт", fontWeight = FontWeight.SemiBold)
                         if (cost.total > 0) {
-                            Hint("закупка ${rubUnit(cost.purchase)} · КИЗ ${rubUnit(cost.marking)} · упаковка ${rubUnit(cost.packaging)}" + if (cost.other > 0) " · прочее ${rubUnit(cost.other)}" else "")
+                            Hint(
+                                buildList {
+                                    add("закупка ${rubUnit(cost.purchase)}")
+                                    if (cost.marking > 0) add("КИЗ ${rubUnit(cost.marking)}")
+                                    if (cost.packaging > 0) add("упаковка ${rubUnit(cost.packaging)}")
+                                    if (cost.other > 0) add("прочее ${rubUnit(cost.other)}")
+                                    cost.extras.forEach { add("${it.name.lowercase()} ${rubUnit(it.amount)}") }
+                                }.joinToString(" · ")
+                            )
                         } else {
                             Text("Не указана — прибыль завышена", color = warnColor, style = MaterialTheme.typography.bodySmall)
                         }
