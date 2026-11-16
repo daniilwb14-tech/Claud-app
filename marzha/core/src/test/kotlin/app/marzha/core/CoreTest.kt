@@ -95,6 +95,19 @@ class CoreTest {
     }
 
     @Test
+    fun accrualsReturnAsPositiveAmount() {
+        // Возврат пришёл положительной суммой, а итог начисления отрицательный.
+        val text = """{"accruals":[{"date":"2026-11-14","total_amount":{"amount":"-480"},
+          "posting":{"products":[{"sku":7,"quantity":1,"commission":{"sale_amount":{"amount":"1000"},
+          "commission":{"amount":"520"}},"delivery":{}}]}}]}"""
+        val r = parseAccruals(text, types, "2026-11-14").rows.single()
+        near(r.returns, -1000.0)
+        assertEquals(1, r.returnQty)
+        assertEquals(0, r.soldQty)
+        near(r.commission, 520.0)
+    }
+
+    @Test
     fun postingsParsing() {
         val text = """{"cursor":"c2","has_next":true,"postings":[
           {"posting_number":"1","status":"delivered","in_process_at":"2026-11-14T22:30:00Z",

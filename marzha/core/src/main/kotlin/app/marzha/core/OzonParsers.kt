@@ -175,8 +175,8 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
                     var cls = types.classOf(s.int("type_id"))
                     deliv += amount
                     // Услуги доставки у возврата — это обратная логистика.
-                    if (cls == FeeClass.LOGISTICS && c.money("sale_amount") < 0) cls = FeeClass.RETURN_LOGISTICS
                     if (cls == FeeClass.OTHER) cls = FeeClass.LOGISTICS
+                    if (cls == FeeClass.LOGISTICS && c.money("sale_amount") < 0) cls = FeeClass.RETURN_LOGISTICS
                     acc.add(feeRow(date, sku, cls, amount))
                 }
                 // Услуг списком нет, а итог по доставке есть.
@@ -197,30 +197,37 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
             val comm = ps.sumOf { it.comm }
             val bonus = ps.sumOf { it.bonus }
             val deliv = ps.sumOf { it.deliv }
-            // Четыре прочтения: комиссия со знаком как есть или наоборот; баллы внутри «реализовано» или сверху.
+            // Прочтения: комиссия со знаком как есть или наоборот; баллы внутри «реализовано» или сверху;
+            // возврат отрицательной суммой или положительной. Берём то, что сходится с итогом начисления.
             var best = 0
-            var bestErr = Double.MAX_VALUE
-            for (v in 0..3) {
-                val cs = if (v and 1 == 0) 1.0 else -1.0
-                val bs = if (v and 2 == 0) 0.0 else 1.0
-                val err = abs(total - (sale + cs * comm + bs * bonus + deliv))
-                if (err < bestErr - 0.005) {
-                    bestErr = err
-                    best = v
+            if (a.obj("total_amount") != null) {
+                var bestErr = Double.MAX_VALUE
+                for (v in 0..7) {
+                    val cs = if (v and 1 == 0) 1.0 else -1.0
+                    val bs = if (v and 2 == 0) 0.0 else 1.0
+                    val ss = if (v and 4 == 0) 1.0 else -1.0
+                    val err = abs(total - (ss * (sale + bs * bonus) + cs * comm + deliv))
+                    if (err < bestErr - 0.005) {
+                        bestErr = err
+                        best = v
+                    }
                 }
             }
             val commSign = if (best and 1 == 0) 1.0 else -1.0
             val bonusOnTop = best and 2 != 0
+            val saleSign = if (best and 4 == 0) 1.0 else -1.0
             for (p in ps) {
-                val revenue = if (bonusOnTop) p.sale + p.bonus else p.sale
+                val sale1 = saleSign * p.sale
+                val bonus1 = saleSign * p.bonus
+                val revenue = if (bonusOnTop) sale1 + bonus1 else sale1
                 // Покупатель заплатил выручку за вычетом баллов и соинвестирования Ozon.
-                val paid = if (bonusOnTop) p.sale else p.sale - if (p.sale >= 0) abs(p.bonus) else -abs(p.bonus)
+                val paid = if (bonusOnTop) sale1 else sale1 - if (sale1 >= 0) abs(bonus1) else -abs(bonus1)
                 val commission = commSign * p.comm
                 acc.add(
                     FinDay(
                         date = date, sku = p.sku,
-                        soldQty = if (p.sale > 0) p.qty else 0,
-                        returnQty = if (p.sale < 0) p.qty else 0,
+                        soldQty = if (revenue > 0) p.qty else 0,
+                        returnQty = if (revenue < 0) p.qty else 0,
                         sales = if (revenue > 0) revenue else 0.0,
                         returns = if (revenue < 0) revenue else 0.0,
                         customerPaid = paid,

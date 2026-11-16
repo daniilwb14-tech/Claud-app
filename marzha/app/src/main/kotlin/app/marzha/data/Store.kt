@@ -93,9 +93,9 @@ class Store(context: Context) {
 
     var settings: EconSettings
         get() = EconSettings(
-            taxPct = p.getFloat("taxPct", 6f).toDouble(),
+            taxPct = round2(p.getFloat("taxPct", 6f)),
             taxBase = runCatching { TaxBase.valueOf(p.getString("taxBase", "") ?: "") }.getOrDefault(TaxBase.ALL),
-            managerPct = p.getFloat("managerPct", 0f).toDouble(),
+            managerPct = round2(p.getFloat("managerPct", 0f)),
             stockTargetDays = p.getInt("stockTargetDays", 30),
         )
         set(v) = p.edit()
@@ -104,6 +104,9 @@ class Store(context: Context) {
             .putFloat("managerPct", v.managerPct.toFloat())
             .putInt("stockTargetDays", v.stockTargetDays)
             .apply()
+
+    /** Ставки хранятся как float; округляем, чтобы 6,3 не превращалось в 6,300000190734863. */
+    private fun round2(v: Float): Double = Math.round(v * 100.0) / 100.0
 
     fun clear() = p.edit().clear().apply()
 }
