@@ -11,6 +11,9 @@ concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -44,3 +47,17 @@ jobs:
         with:
           name: grosh-android-apk
           path: android/grosh-test.apk
+
+      # Кладёт свежий APK в служебную ссылку refs/builds/android-apk (не ветка, в истории проекта не видна),
+      # чтобы его можно было забрать обычным git fetch.
+      - name: Publish APK to build ref
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir "$RUNNER_TEMP/apk" && cd "$RUNNER_TEMP/apk"
+          cp "$GITHUB_WORKSPACE/android/grosh-test.apk" .
+          git init -q
+          git add grosh-test.apk
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -qm "APK build ${{ github.run_number }}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" HEAD:refs/builds/android-apk
