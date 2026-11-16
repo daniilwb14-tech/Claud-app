@@ -1,0 +1,63 @@
+name: Marzha (Android)
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths: ["marzha/**", ".github/workflows/marzha.yml"]
+  pull_request:
+    paths: ["marzha/**"]
+
+concurrency:
+  group: marzha-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: marzha
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Core unit tests
+        run: ./gradlew :core:test --console=plain
+
+      - name: Build APK
+        run: |
+          ./gradlew :app:assembleDebug --console=plain -PversionCode=${{ github.run_number }} > build.log 2>&1 || {
+            grep -E "^e: |error:|FAILED|What went wrong" -A3 build.log | head -150
+            exit 1
+          }
+          tail -5 build.log
+          cp app/build/outputs/apk/debug/app-debug.apk marzha-test.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marzha-android-apk
+          path: marzha/marzha-test.apk
+
+      # Кладёт свежий APK в служебную ссылку refs/builds/marzha-apk (не ветка, в истории проекта не видна),
+      # чтобы его можно было забрать обычным git fetch.
+      - name: Publish APK to build ref
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir "$RUNNER_TEMP/apk" && cd "$RUNNER_TEMP/apk"
+          cp "$GITHUB_WORKSPACE/marzha/marzha-test.apk" .
+          git init -q
+          git add marzha-test.apk
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -qm "APK build ${{ github.run_number }}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" HEAD:refs/builds/marzha-apk

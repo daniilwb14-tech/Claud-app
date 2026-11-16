@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Три растущих столбика и линия тренда. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#9FE5CD" android:pathData="M34,58h10v18h-10z" />
+    <path android:fillColor="#CFF5E7" android:pathData="M49,48h10v28h-10z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M64,36h10v40h-10z" />
+    <path
+        android:pathData="M33,48 L48,38 L58,42 L75,28"
+        android:strokeColor="#FFD166"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path android:fillColor="#FFD166" android:pathData="M75,28m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>
