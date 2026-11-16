@@ -5,3 +5,7 @@ xcuserdata/
 *.xcuserstate
 .DS_Store
 .swiftpm/
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.kotlin/

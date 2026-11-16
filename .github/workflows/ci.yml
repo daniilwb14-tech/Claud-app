@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: ["main", "claude/**"]
+    paths-ignore: ["android/**", ".github/workflows/android.yml", "**.md"]
   pull_request:
+    paths-ignore: ["android/**", "**.md"]
 
 concurrency:
   group: ci-${{ github.ref }}
