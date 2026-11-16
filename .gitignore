@@ -13,3 +13,4 @@ marzha/.gradle/
 marzha/**/build/
 marzha/local.properties
 marzha/.kotlin/
+builds/
