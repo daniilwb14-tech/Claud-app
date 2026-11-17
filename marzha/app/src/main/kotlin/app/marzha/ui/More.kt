@@ -507,8 +507,15 @@ fun AdsScreen(vm: AppViewModel, back: () -> Unit, openProduct: (Long) -> Unit) {
                     Spacer(Modifier.height(6.dp))
                     Line("Расход", rub(c.spent), bold = true)
                     Line("Показы → клики", "${qty(c.views.toInt())} → ${qty(c.clicks.toInt())}", sub = "CTR ${pct(c.ctr)}")
-                    Line("Заказы", "${qty(c.orders.toInt())} шт · ${rub(c.ordersSum)}", sub = "заказ стоит ${rubUnit(c.cpo)}")
-                    Line("ДРР", pct(c.drr), valueColor = if (c.drr > 0.15) lossColor else profitColor)
+                    if (c.orders > 0 || c.ordersSum > 0) {
+                        Line("Заказы", "${qty(c.orders.toInt())} шт · ${rub(c.ordersSum)}", sub = "заказ стоит ${rubUnit(c.cpo)}")
+                        Line("ДРР", pct(c.drr), valueColor = if (c.drr > 0.15) lossColor else profitColor)
+                    } else {
+                        // Кампании с оплатой за заказ: Ozon отдаёт по ним только расход, без заказов.
+                        val all = report?.total?.orderedSum ?: 0.0
+                        Line("Заказы", "Ozon не передаёт", sub = "у кампаний с оплатой за заказ в статистике только расход")
+                        if (all > 0) Line("ДРР от всех заказов", pct(c.spent / all), sub = "расход кампании ÷ все заказы за период, ${rubShort(all)}")
+                    }
                 }
             }
         }
