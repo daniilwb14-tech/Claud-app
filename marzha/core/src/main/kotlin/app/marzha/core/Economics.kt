@@ -62,6 +62,8 @@ data class SkuReport(
     val orderedQty: Int = 0,
     val orderedSum: Double = 0.0,
     val cancelledQty: Int = 0,
+    /** Из заказов периода — доставлено покупателю. */
+    val deliveredQty: Int = 0,
     /** Оплатили покупатели, ₽ (без баллов Ozon). */
     val customerPaid: Double = 0.0,
     val b: Breakdown = Breakdown(),
@@ -85,8 +87,14 @@ data class SkuReport(
             else -> 0.0
         }
 
-    /** Доля выкупа: выкуплено к заказано за тот же период (оценка, заказы доезжают с задержкой). */
-    val buyout: Double get() = if (orderedQty > 0) (netQty.toDouble() / orderedQty).coerceIn(0.0, 1.0) else 0.0
+    /** Заказы периода, судьба которых уже известна: доставлены или отменены. */
+    val finishedQty: Int get() = deliveredQty + cancelledQty
+
+    /**
+     * Процент выкупа: из заказов этого периода, которые уже доставлены или отменены, — доля доставленных.
+     * Заказы в пути не учитываются, пока не станет ясно, выкупят их или нет. null — завершённых заказов нет.
+     */
+    val buyout: Double? get() = if (finishedQty > 0) deliveredQty.toDouble() / finishedQty else null
     val avgPrice: Double get() = if (netQty > 0) b.revenue / netQty else 0.0
 
     /** Баллы и скидки за счёт Ozon. */
@@ -218,6 +226,7 @@ fun buildReport(
             product = products[sku] ?: Product(sku, name = "SKU $sku"),
             soldQty = r.soldQty, returnQty = r.returnQty,
             orderedQty = o?.orderedQty ?: 0, orderedSum = o?.orderedSum ?: 0.0, cancelledQty = o?.cancelledQty ?: 0,
+            deliveredQty = o?.deliveredQty ?: 0,
             customerPaid = r.customerPaid, b = b,
             hasCost = (costs[sku]?.total ?: 0.0) > 0,
         )
@@ -232,7 +241,8 @@ fun buildReport(
         sku = 0, product = Product(0, name = "Итого"),
         soldQty = lines.sumOf { it.soldQty }, returnQty = lines.sumOf { it.returnQty },
         orderedQty = lines.sumOf { it.orderedQty }, orderedSum = lines.sumOf { it.orderedSum },
-        cancelledQty = lines.sumOf { it.cancelledQty }, customerPaid = lines.sumOf { it.customerPaid },
+        cancelledQty = lines.sumOf { it.cancelledQty }, deliveredQty = lines.sumOf { it.deliveredQty },
+        customerPaid = lines.sumOf { it.customerPaid },
         b = lines.fold(Breakdown()) { a, l -> a + l.b },
     )
 

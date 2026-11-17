@@ -84,10 +84,14 @@ class CoreTest {
     @Test
     fun payoutIsNotAnExpense() {
         val t = FeeTypes.parse("""{"accrual_types":[{"id":1,"name":"Выплата продавцу"},{"id":2,"name":"Компенсация за доставку"},
-            {"id":3,"name":"Перечисление средств на расчётный счёт"}]}""")
+            {"id":3,"name":"Перечисление средств на расчётный счёт"},{"id":4,"name":"Досрочная выплата"},
+            {"id":5,"name":"Комиссия за досрочную выплату продавцу"}]}""")
         assertEquals(FeeClass.TRANSFER, t.classOf(1))
         assertTrue(t.classOf(2) != FeeClass.TRANSFER)
         assertEquals(FeeClass.TRANSFER, t.classOf(3))
+        // Досрочная выплата — это плата Ozon за услугу, то есть расход.
+        assertEquals(FeeClass.OTHER, t.classOf(4))
+        assertEquals(FeeClass.OTHER, t.classOf(5))
         val page = parseAccruals(
             """{"accruals":[{"date":"2026-11-10","total_amount":{"amount":"-500000"},"non_item_fee":{"type_id":1,"accrued":{"amount":"-500000"}}}]}""",
             t, "2026-11-10",
@@ -143,6 +147,7 @@ class CoreTest {
           {"posting_number":"2","status":"cancelled","created_at":"2026-11-16T08:00:00Z",
            "products":[{"sku":100,"quantity":1,"price":"1500.0000"}]}]}"""
         val p = parsePostings(text)
+        assertEquals(2, p.rows.sumOf { it.deliveredQty })
         assertTrue(p.hasNext)
         assertEquals("c2", p.cursor)
         assertEquals(2, p.rows.size)
@@ -206,7 +211,7 @@ class CoreTest {
             FinDay("2026-11-04", 0, storage = -240.0, ads = -120.0),
             FinDay("2026-10-31", 1, soldQty = 99, sales = 99000.0), // вне периода
         )
-        val orders = listOf(OrderDay("2026-11-02", 1, 14, 14000.0, 2))
+        val orders = listOf(OrderDay("2026-11-02", 1, 14, 14000.0, 2, 10))
         val costs = mapOf(1L to UnitCost(100.0, 5.5, 16.0))
         val expenses = listOf(Expense(1, "Кабинет", 3000.0, ExpenseKind.MONTHLY), Expense(2, "Фото", 1200.0, ExpenseKind.ONCE, "2026-11-10"))
         val s = EconSettings(taxPct = 6.0, taxBase = TaxBase.CUSTOMER_PAID, managerPct = 1.0)
@@ -225,6 +230,9 @@ class CoreTest {
         near(a.b.ads, -600.0 - 90.0)
         near(a.b.fixed + b.b.fixed, -4200.0)
         near(a.drr, 690.0 / 14000.0, 1e-9)
+        // Выкуп: 10 доставлено из 12 завершённых (2 заказа ещё в пути). Выкуплено за период больше заказанного — не важно.
+        near(a.buyout!!, 10.0 / 12.0, 1e-9)
+        assertEquals(null, b.buyout)
         assertTrue(a.hasCost)
         assertTrue(!b.hasCost)
         assertEquals(1, r.missingCost)

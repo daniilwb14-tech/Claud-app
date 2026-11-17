@@ -40,7 +40,10 @@ data class FinE(
 )
 
 @Entity(tableName = "orders", primaryKeys = ["date", "sku"])
-data class OrderE(val date: String, val sku: Long, val orderedQty: Int, val orderedSum: Double, val cancelledQty: Int)
+data class OrderE(
+    val date: String, val sku: Long, val orderedQty: Int, val orderedSum: Double, val cancelledQty: Int,
+    @ColumnInfo(defaultValue = "0") val deliveredQty: Int = 0,
+)
 
 @Entity(tableName = "stock")
 data class StockE(@PrimaryKey val sku: Long, val fbo: Int, val fbs: Int, val inTransit: Int, val returning: Int)
@@ -68,8 +71,8 @@ fun CostE.toCore() = UnitCost(purchase, marking, packaging, other, UnitCost.pars
 fun UnitCost.toE(sku: Long) = CostE(sku, purchase, marking, packaging, other, extrasText())
 fun FinE.toCore() = FinDay(date, sku, soldQty, returnQty, sales, returns, customerPaid, commission, logistics, returnLogistics, ads, storage, acquiring, crossdock, other)
 fun FinDay.toE() = FinE(date, sku, soldQty, returnQty, sales, returns, customerPaid, commission, logistics, returnLogistics, ads, storage, acquiring, crossdock, other)
-fun OrderE.toCore() = OrderDay(date, sku, orderedQty, orderedSum, cancelledQty)
-fun OrderDay.toE() = OrderE(date, sku, orderedQty, orderedSum, cancelledQty)
+fun OrderE.toCore() = OrderDay(date, sku, orderedQty, orderedSum, cancelledQty, deliveredQty)
+fun OrderDay.toE() = OrderE(date, sku, orderedQty, orderedSum, cancelledQty, deliveredQty)
 fun StockE.toCore() = Stock(sku, fbo, fbs, inTransit, returning)
 fun Stock.toE() = StockE(sku, fbo, fbs, inTransit, returning)
 fun ExpenseE.toCore() = Expense(id, name, amount, runCatching { ExpenseKind.valueOf(kind) }.getOrDefault(ExpenseKind.MONTHLY), date)
@@ -104,6 +107,7 @@ interface AppDao {
     @Query("DELETE FROM expense WHERE id = :id") suspend fun deleteExpense(id: Long)
 
     @Query("SELECT date FROM loaded_day") suspend fun loadedDays(): List<String>
+    @Query("DELETE FROM loaded_day") suspend fun clearLoadedDays()
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putLoadedDay(row: LoadedDayE)
 
     @Query("SELECT * FROM acc_type WHERE date >= :from AND date <= :to") suspend fun accTypes(from: String, to: String): List<AccTypeE>
@@ -117,7 +121,7 @@ interface AppDao {
 
 @Database(
     entities = [ProductE::class, CostE::class, FinE::class, OrderE::class, StockE::class, ExpenseE::class, AdE::class, LoadedDayE::class, AccTypeE::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class Db : RoomDatabase() {
@@ -126,6 +130,13 @@ abstract class Db : RoomDatabase() {
     companion object {
         @Volatile
         private var instance: Db? = null
+
+        /** Версия 4: сколько из заказанного уже доставлено — для честного процента выкупа. */
+        private val migration3to4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE orders ADD COLUMN deliveredQty INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         /** Версия 2: свои статьи себестоимости. Введённые данные сохраняются. */
         private val migration1to2 = object : Migration(1, 2) {
@@ -147,7 +158,7 @@ abstract class Db : RoomDatabase() {
 
         fun get(context: Context): Db = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, Db::class.java, "marzha.db")
-                .addMigrations(migration1to2, migration2to3)
+                .addMigrations(migration1to2, migration2to3, migration3to4)
                 .fallbackToDestructiveMigration()
                 .build().also { instance = it }
         }

@@ -49,7 +49,9 @@ fun demoData(today: LocalDate, days: Int = 62): DemoData {
             val weekend = if (date.dayOfWeek.value >= 6) 0.85 else 1.0
             val ordered = (item.perDay * trend * weekend * (0.8 + rnd.nextDouble() * 0.4)).roundToInt()
             val cancelled = (ordered * (0.16 + rnd.nextDouble() * 0.08)).roundToInt()
-            orders += OrderDay(date.toString(), sku, ordered, ordered * item.price, cancelled)
+            // Свежие заказы ещё в пути; через неделю почти все уже доставлены или отменены.
+            val delivered = if (back <= 3) 0 else ((ordered - cancelled) * if (back <= 8) 0.6 else 0.97).roundToInt()
+            orders += OrderDay(date.toString(), sku, ordered, ordered * item.price, cancelled, delivered)
             val sold = (ordered * (0.70 + rnd.nextDouble() * 0.1)).roundToInt()
             val returned = (sold * 0.012 + rnd.nextDouble() * 0.6).toInt()
             val sales = sold * item.price

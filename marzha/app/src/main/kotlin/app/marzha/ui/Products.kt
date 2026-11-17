@@ -42,7 +42,7 @@ fun ProductsScreen(vm: AppViewModel, sort: ProductSort, onSort: (ProductSort) ->
             ProductSort.PROFIT -> all.sortedByDescending { it.b.profit }
             ProductSort.REVENUE -> all.sortedByDescending { it.b.revenue }
             ProductSort.ORDERED -> all.filter { it.orderedQty > 0 }.sortedByDescending { it.orderedSum }
-            ProductSort.BUYOUT -> all.filter { it.orderedQty > 0 }.sortedByDescending { it.buyout }
+            ProductSort.BUYOUT -> all.filter { it.buyout != null }.sortedByDescending { it.buyout }
             ProductSort.ADS -> all.filter { it.b.ads < -0.5 }.sortedBy { it.b.ads }
             ProductSort.MARGIN -> all.sortedByDescending { if (it.b.revenue > 0) it.margin else -1.0 }
             ProductSort.COGS -> all.sortedBy { it.b.cogs }
@@ -207,7 +207,7 @@ fun ProductDetailScreen(vm: AppViewModel, sku: Long, back: () -> Unit) {
                     Kpi("Выкуплено", rubShort(line.b.revenue), "${qty(line.netQty)} шт · возвратов ${qty(line.returnQty)}", Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Kpi("Заказано", "${qty(line.orderedQty)} шт", "выкуп ≈ ${pct(line.buyout)}", Modifier.weight(1f))
+                    Kpi("Заказано", "${qty(line.orderedQty)} шт", "выкуп ${line.buyout?.let(::pct) ?: "— (в пути)"}", Modifier.weight(1f))
                     Kpi("Реклама", rubShort(-line.b.ads), "ДРР ${pct(line.drr)}", Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

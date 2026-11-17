@@ -187,7 +187,11 @@ private fun KpiGrid(
             Kpi("Себестоимость", rubShort(-t.b.cogs), "средний чек ${rubUnit(t.avgPrice)}", Modifier.weight(1f), onClick = { openProducts(ProductSort.COGS) })
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Kpi("Процент выкупа", if (t.orderedQty > 0) pct(t.buyout) else "—", "${qty(t.netQty)} из ${qty(t.orderedQty)} шт", Modifier.weight(1f), onClick = { openProducts(ProductSort.BUYOUT) })
+            Kpi(
+                "Процент выкупа", t.buyout?.let(::pct) ?: "—",
+                if (t.finishedQty > 0) "доставлено ${qty(t.deliveredQty)} из ${qty(t.finishedQty)}" else "заказы ещё в пути",
+                Modifier.weight(1f), onClick = { openProducts(ProductSort.BUYOUT) },
+            )
             Kpi("Налог", rubShort(-t.b.tax), if (t.b.revenue > 0) "${pct(-t.b.tax / t.b.revenue)} от выкупов" else "", Modifier.weight(1f), onClick = openSettings)
         }
     }
@@ -286,8 +290,8 @@ fun ProductRow(l: SkuReport, mode: ProductSort = ProductSort.PROFIT, onClick: ()
             main = "${qty(l.orderedQty)} шт"; mainColor = Color.Unspecified; side = rubShort(l.orderedSum)
         }
         ProductSort.BUYOUT -> {
-            sub = "заказано ${qty(l.orderedQty)} · выкуплено ${qty(l.netQty)} шт"
-            main = if (l.orderedQty > 0) pct(l.buyout) else "—"; mainColor = Color.Unspecified; side = "выкуп"
+            sub = "доставлено ${qty(l.deliveredQty)} · отменено ${qty(l.cancelledQty)} · в пути ${qty(l.orderedQty - l.finishedQty)}"
+            main = l.buyout?.let(::pct) ?: "—"; mainColor = Color.Unspecified; side = "выкуп"
         }
         ProductSort.ADS -> {
             sub = "заказано ${rubShort(l.orderedSum)}"

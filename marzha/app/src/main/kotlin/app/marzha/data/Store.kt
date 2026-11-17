@@ -88,6 +88,11 @@ class Store(context: Context) {
         get() = p.getString("theme", "GREEN") ?: "GREEN"
         set(v) = p.edit().putString("theme", v).apply()
 
+    /** Версия правил разбора. Когда правила меняются, уже загруженные дни нужно скачать заново. */
+    var dataVersion: Int
+        get() = p.getInt("dataVersion", 0)
+        set(v) = p.edit().putInt("dataVersion", v).apply()
+
     var lastSync: Long
         get() = p.getLong("lastSync", 0)
         set(v) = p.edit().putLong("lastSync", v).apply()

@@ -86,11 +86,14 @@ data class OrderDay(
     val orderedQty: Int = 0,
     val orderedSum: Double = 0.0,
     val cancelledQty: Int = 0,
+    /** Из заказанных — уже доставлено покупателю. */
+    val deliveredQty: Int = 0,
 ) {
     operator fun plus(o: OrderDay) = copy(
         orderedQty = orderedQty + o.orderedQty,
         orderedSum = orderedSum + o.orderedSum,
         cancelledQty = cancelledQty + o.cancelledQty,
+        deliveredQty = deliveredQty + o.deliveredQty,
     )
 }
 

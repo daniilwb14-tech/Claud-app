@@ -83,9 +83,10 @@ fun classifyFee(name: String): FeeClass {
     val n = name.lowercase()
     fun has(vararg keys: String) = keys.any { n.contains(it) }
     return when {
-        // Перевод заработанного на счёт продавца: если считать его расходом, прибыль уходит в минус в дни выплат.
-        (has("выплат", "перечислен", "вывод средств", "перевод на", "перевод денег", "перевод средств") &&
-            !has("компенсац", "возмещ", "за доставку", "покупател")) -> FeeClass.TRANSFER
+        // Перевод заработанного на счёт продавца — не расход. Но «Досрочная выплата» и подобное — это плата Ozon
+        // за услугу, то есть расход: такие названия сюда не попадают.
+        (has("выплат", "перечислен", "перевод") && has("продавц", "счёт", "счет", "расчётн", "расчетн") &&
+            !has("досроч", "комисси", "плата за", "услуг", "штраф", "компенсац", "возмещ", "покупател", "доставк")) -> FeeClass.TRANSFER
         has("эквайринг") -> FeeClass.ACQUIRING
         has(
             "реклам", "продвижен", "трафарет", "клик", "вывод в топ", "бренд", "отзыв", "рассылк",
@@ -340,12 +341,14 @@ fun parsePostings(text: String): OrdersPage {
     for (p in postings) {
         val date = moscowDate(p.str("in_process_at").ifEmpty { p.str("created_at") })
         if (date.isEmpty()) continue
-        val cancelled = p.str("status") == "cancelled"
+        val status = p.str("status")
+        val cancelled = status == "cancelled"
+        val delivered = status == "delivered"
         for (item in p.arr("products")) {
             val sku = item.long("sku")
             if (sku == 0L) continue
             val qty = item.int("quantity").coerceAtLeast(1)
-            val row = OrderDay(date, sku, qty, item.num("price") * qty, if (cancelled) qty else 0)
+            val row = OrderDay(date, sku, qty, item.num("price") * qty, if (cancelled) qty else 0, if (delivered) qty else 0)
             val key = "$date|$sku"
             map[key] = map[key]?.plus(row) ?: row
             if (sku !in names) names[sku] = Product(sku, item.str("offer_id"), item.str("name"))

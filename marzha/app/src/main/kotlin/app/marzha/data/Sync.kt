@@ -29,6 +29,17 @@ class SyncResult(
 class Sync(private val db: Db, private val store: Store) {
     private val dao = db.dao()
 
+    companion object {
+        /**
+         * Версия правил разбора начислений и заказов. 4 — «Досрочная выплата» снова считается расходом,
+         * в заказах появился статус доставки. При повышении все дни загружаются заново.
+         */
+        const val DATA_VERSION = 4
+
+        /** Сколько последних дней заказов обновлять каждый раз: статусы «доставлен» и «отменён» приходят позже. */
+        const val ORDER_REFRESH_DAYS = 21L
+    }
+
     suspend fun run(wantFrom: LocalDate, today: LocalDate, progress: (String) -> Unit): SyncResult {
         val api = OzonClient(store.clientId, store.apiKey)
         val warnings = ArrayList<String>()
@@ -49,6 +60,14 @@ class Sync(private val db: Db, private val store: Store) {
         } catch (e: ApiException) {
             if (e.code == 401 || e.code == 403) throw e
             warnings += "Остатки не обновились: " + describeError(e)
+        }
+
+        // Правила разбора поменялись — старые дни пересчитаем, скачав заново.
+        val reloadAll = store.dataVersion < DATA_VERSION
+        if (reloadAll) {
+            dao.clearLoadedDays()
+            // Сразу отмечаем: недогруженные дни и так докачаются потом, а полная перезагрузка нужна один раз.
+            store.dataVersion = DATA_VERSION
         }
 
         // Какие дни нужно загрузить: всё, чего нет, плюс три последних дня.
@@ -97,8 +116,9 @@ class Sync(private val db: Db, private val store: Store) {
         }
         store.historyFrom = minOf(store.historyFrom ?: wantFrom, wantFrom)
 
-        // Заказы: новые дни и последняя неделя (статусы и отмены меняются).
-        val orderDays = days.toSet() + (0..7L).map { today.minusDays(it) }
+        // Заказы: новые дни и последние три недели (статусы доставки и отмены меняются). После смены правил — вся история.
+        val orderDays = days.toSet() + (0..ORDER_REFRESH_DAYS).map { today.minusDays(it) } +
+            if (reloadAll) generateSequence(wantFrom) { it.plusDays(1) }.takeWhile { !it.isAfter(today) }.toList() else emptyList()
         val ranges = dayChunks(orderDays.min(), today, 2).filter { (a, b) -> a in orderDays || b in orderDays }
         var ordersFailed = 0
         for ((i, r) in ranges.sortedByDescending { it.first }.withIndex()) {
