@@ -78,6 +78,7 @@ fun StocksScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
             Text("Остатки и деньги в товаре", Modifier.padding(start = 4.dp, top = 16.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Hint("Склады Ozon, свой склад, поставки в пути и возвраты, которые едут обратно на склад.", Modifier.padding(start = 4.dp))
         }
+        item { SyncBanner(vm) }
         if (rep == null) {
             item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
             return@LazyColumn
@@ -86,10 +87,10 @@ fun StocksScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Kpi("Вложено в товар", rubShort(rep.invested), "${qty(rep.units)} шт по себестоимости", Modifier.weight(1f), onClick = { show(StockSort.ALL) })
-                    Kpi("Выручка, если продать всё", rubShort(rep.expectedRevenue), "по средним ценам за 30 дней", Modifier.weight(1f), onClick = { show(StockSort.ALL) })
+                    Kpi("Вернётся денег", rubShort(rep.moneyBack), "вложенное + прибыль", Modifier.weight(1f), onClick = { show(StockSort.INVESTED) })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Kpi("Принесёт чистой прибыли", rubShort(rep.expectedProfit), "если продавать как за 30 дней", Modifier.weight(1f), signColor(rep.expectedProfit), onClick = { show(StockSort.INVESTED) })
+                    Kpi("Принесёт чистой прибыли", rubShort(rep.expectedProfit), "по прибыли с 1 шт за 30 дней", Modifier.weight(1f), signColor(rep.expectedProfit), onClick = { show(StockSort.INVESTED) })
                     Kpi(
                         "Докупить на ${vm.settings.stockTargetDays} дн.", if (rep.toBuyUnits > 0) rubShort(rep.toBuySum) else "Хватает",
                         if (rep.toBuyUnits > 0) "${qty(rep.toBuyUnits)} шт по себестоимости" else "запаса достаточно",
@@ -97,6 +98,13 @@ fun StocksScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
                     )
                 }
             }
+        }
+        item {
+            Hint(
+                "Выручка, если продать всё по средним ценам за 30 дней (с баллами Ozon): ${rubShort(rep.expectedRevenue)}. " +
+                    "Из неё Ozon удержит комиссию, логистику и рекламу, поэтому вернётся меньше.",
+                Modifier.padding(horizontal = 4.dp),
+            )
         }
         item { ChoiceChips(StockSort.entries.map { it to it.title }, sort, { sort = it }) }
         item { Legend() }

@@ -63,13 +63,29 @@ fun moscowDate(iso: String): String {
 
 // ───────────────────────── Виды начислений ─────────────────────────
 
-enum class FeeClass { ACQUIRING, ADS, CROSSDOCK, STORAGE, RETURN_LOGISTICS, LOGISTICS, OTHER }
+enum class FeeClass(val title: String) {
+    SALES("Продажи и возвраты"),
+    COMMISSION("Комиссия"),
+    ACQUIRING("Эквайринг"),
+    ADS("Реклама"),
+    CROSSDOCK("Кросс-докинг"),
+    STORAGE("Хранение"),
+    RETURN_LOGISTICS("Обратная логистика"),
+    LOGISTICS("Логистика"),
+    OTHER("Прочие начисления"),
+
+    /** Перевод денег продавцу — это не расход, в прибыль не входит. */
+    TRANSFER("Выплаты на счёт — не расход"),
+}
 
 /** Относит вид начисления к статье расходов по его названию из справочника Ozon. */
 fun classifyFee(name: String): FeeClass {
     val n = name.lowercase()
     fun has(vararg keys: String) = keys.any { n.contains(it) }
     return when {
+        // Перевод заработанного на счёт продавца: если считать его расходом, прибыль уходит в минус в дни выплат.
+        (has("выплат", "перечислен", "вывод средств", "перевод на", "перевод денег", "перевод средств") &&
+            !has("компенсац", "возмещ", "за доставку", "покупател")) -> FeeClass.TRANSFER
         has("эквайринг") -> FeeClass.ACQUIRING
         has(
             "реклам", "продвижен", "трафарет", "клик", "вывод в топ", "бренд", "отзыв", "рассылк",
@@ -111,7 +127,26 @@ class FeeTypes(private val byId: Map<Int, FeeClass> = emptyMap(), val names: Map
 
 // ───────────────────────── Начисления за день ─────────────────────────
 
-class FinPage(val rows: List<FinDay>, val lastId: String, val count: Int)
+/** Сумма за день по одному виду начисления — для экрана проверки данных. */
+data class TypeTotal(val name: String, val cls: FeeClass, val amount: Double, val count: Int = 1) {
+    operator fun plus(o: TypeTotal) = copy(amount = amount + o.amount, count = count + o.count)
+}
+
+/** Копилка сумм по видам начислений. */
+class TypeAccumulator {
+    private val map = LinkedHashMap<String, TypeTotal>()
+
+    fun add(name: String, cls: FeeClass, amount: Double) {
+        if (abs(amount) < 0.005) return
+        val t = TypeTotal(name, cls, amount)
+        map[name] = map[name]?.plus(t) ?: t
+    }
+
+    fun addAll(list: List<TypeTotal>) = list.forEach { t -> map[t.name] = map[t.name]?.plus(t) ?: t }
+    fun list(): List<TypeTotal> = map.values.toList()
+}
+
+class FinPage(val rows: List<FinDay>, val lastId: String, val count: Int, val types: List<TypeTotal> = emptyList())
 
 /** Копилка начислений по ключу «дата + SKU». */
 class FinAccumulator {
@@ -135,7 +170,8 @@ private fun feeRow(date: String, sku: Long, cls: FeeClass, amount: Double): FinD
         FeeClass.STORAGE -> base.copy(storage = amount)
         FeeClass.RETURN_LOGISTICS -> base.copy(returnLogistics = amount)
         FeeClass.LOGISTICS -> base.copy(logistics = amount)
-        FeeClass.OTHER -> base.copy(other = amount)
+        FeeClass.OTHER, FeeClass.SALES, FeeClass.COMMISSION -> base.copy(other = amount)
+        FeeClass.TRANSFER -> base
     }
 }
 
@@ -151,6 +187,8 @@ private fun feeRow(date: String, sku: Long, cls: FeeClass, amount: Double): FinD
 fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage {
     val root = parseJson(text)
     val acc = FinAccumulator()
+    val tt = TypeAccumulator()
+    fun typeName(id: Int) = types.names[id] ?: "Вид начисления $id"
     val list = root.arr("accruals")
     for (a in list) {
         val date = a.str("date").take(10).ifEmpty { fallbackDate }
@@ -178,13 +216,16 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
                     if (cls == FeeClass.OTHER) cls = FeeClass.LOGISTICS
                     if (cls == FeeClass.LOGISTICS && c.money("sale_amount") < 0) cls = FeeClass.RETURN_LOGISTICS
                     acc.add(feeRow(date, sku, cls, amount))
+                    tt.add(typeName(s.int("type_id")), cls, amount)
                 }
                 // Услуг списком нет, а итог по доставке есть.
                 if (delivery.arr("services").isEmpty()) {
                     val t = delivery.money("total_accrued")
                     if (t != 0.0) {
                         deliv += t
-                        acc.add(feeRow(date, sku, if (c.money("sale_amount") < 0) FeeClass.RETURN_LOGISTICS else FeeClass.LOGISTICS, t))
+                        val cls = if (c.money("sale_amount") < 0) FeeClass.RETURN_LOGISTICS else FeeClass.LOGISTICS
+                        acc.add(feeRow(date, sku, cls, t))
+                        tt.add("Доставка (без расшифровки)", cls, t)
                     }
                 }
                 ps += P(
@@ -235,6 +276,8 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
                     )
                 )
                 parsed += revenue + commission + p.deliv
+                tt.add(if (revenue >= 0) "Продажи (реализовано)" else "Возвраты (реализовано)", FeeClass.SALES, revenue)
+                tt.add("Комиссия за продажу", FeeClass.COMMISSION, commission)
             }
         }
 
@@ -244,7 +287,9 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
             if (mainSku == 0L) mainSku = sku
             for (f in item.arr("fees")) {
                 val amount = f.money("accrued")
-                acc.add(feeRow(date, sku, types.classOf(f.int("type_id")), amount))
+                val cls = types.classOf(f.int("type_id"))
+                acc.add(feeRow(date, sku, cls, amount))
+                tt.add(typeName(f.int("type_id")), cls, amount)
                 parsed += amount
             }
         }
@@ -253,7 +298,9 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
         a.obj("non_item_fee")?.let { f ->
             val amount = f.money("accrued")
             if (amount != 0.0) {
-                acc.add(feeRow(date, 0, types.classOf(f.int("type_id")), amount))
+                val cls = types.classOf(f.int("type_id"))
+                acc.add(feeRow(date, 0, cls, amount))
+                tt.add(typeName(f.int("type_id")), cls, amount)
                 parsed += amount
             }
         }
@@ -264,6 +311,7 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
             var cls = types.classOf(f.int("type_id"))
             if (cls == FeeClass.OTHER) cls = FeeClass.CROSSDOCK
             acc.add(feeRow(date, 0, cls, amount))
+            tt.add(typeName(f.int("type_id")), cls, amount)
             parsed += amount
         }
 
@@ -271,9 +319,10 @@ fun parseAccruals(text: String, types: FeeTypes, fallbackDate: String): FinPage 
         val rest = total - parsed
         if (a.obj("total_amount") != null && abs(rest) >= 0.01) {
             acc.add(FinDay(date, mainSku, other = rest))
+            tt.add("Не разобрано (разница с итогом Ozon)", FeeClass.OTHER, rest)
         }
     }
-    return FinPage(acc.rows(), root.str("last_id"), list.size)
+    return FinPage(acc.rows(), root.str("last_id"), list.size, tt.list())
 }
 
 // ───────────────────────── Заказы ─────────────────────────

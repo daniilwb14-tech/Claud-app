@@ -14,7 +14,10 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
-        versionName = "1.0"
+        versionName = "1.1"
+        // Адрес поддержки: задаётся в gradle.properties (supportEmail=...), чтобы не править код.
+        val supportEmail = (findProperty("supportEmail") as String?).orEmpty()
+        buildConfigField("String", "SUPPORT_EMAIL", "\"$supportEmail\"")
     }
 
     signingConfigs {
@@ -51,6 +54,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources.excludes += setOf(

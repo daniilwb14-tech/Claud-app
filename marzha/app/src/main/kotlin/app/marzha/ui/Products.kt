@@ -53,7 +53,7 @@ fun ProductsScreen(vm: AppViewModel, sort: ProductSort, onSort: (ProductSort) ->
 
     Column(Modifier.fillMaxSize()) {
         Text("Товары", Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        PeriodChips(vm.period, vm::choosePeriod)
+        PeriodChips(vm)
         OutlinedTextField(
             value = query, onValueChange = { query = it },
             placeholder = { Text("Артикул, название или SKU") },

@@ -54,6 +54,14 @@ data class AdE(
     val spent: Double, val orders: Long, val ordersSum: Double,
 )
 
+/** День, за который начисления Ozon загружены целиком. */
+@Entity(tableName = "loaded_day")
+data class LoadedDayE(@PrimaryKey val date: String, val at: Long)
+
+/** Сумма за день по виду начисления Ozon — для проверки данных. */
+@Entity(tableName = "acc_type", primaryKeys = ["date", "name"])
+data class AccTypeE(val date: String, val name: String, val cls: String, val amount: Double, val count: Int)
+
 fun ProductE.toCore() = Product(sku, offerId, name, image)
 fun Product.toE() = ProductE(sku, offerId, name, image)
 fun CostE.toCore() = UnitCost(purchase, marking, packaging, other, UnitCost.parseExtras(extras))
@@ -95,14 +103,21 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putExpenses(rows: List<ExpenseE>)
     @Query("DELETE FROM expense WHERE id = :id") suspend fun deleteExpense(id: Long)
 
+    @Query("SELECT date FROM loaded_day") suspend fun loadedDays(): List<String>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putLoadedDay(row: LoadedDayE)
+
+    @Query("SELECT * FROM acc_type WHERE date >= :from AND date <= :to") suspend fun accTypes(from: String, to: String): List<AccTypeE>
+    @Query("DELETE FROM acc_type WHERE date = :date") suspend fun deleteAccTypes(date: String)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putAccTypes(rows: List<AccTypeE>)
+
     @Query("SELECT * FROM ad WHERE date >= :from AND date <= :to") suspend fun ads(from: String, to: String): List<AdE>
     @Query("DELETE FROM ad WHERE date >= :from AND date <= :to") suspend fun deleteAds(from: String, to: String)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putAds(rows: List<AdE>)
 }
 
 @Database(
-    entities = [ProductE::class, CostE::class, FinE::class, OrderE::class, StockE::class, ExpenseE::class, AdE::class],
-    version = 2,
+    entities = [ProductE::class, CostE::class, FinE::class, OrderE::class, StockE::class, ExpenseE::class, AdE::class, LoadedDayE::class, AccTypeE::class],
+    version = 3,
     exportSchema = false,
 )
 abstract class Db : RoomDatabase() {
@@ -119,9 +134,20 @@ abstract class Db : RoomDatabase() {
             }
         }
 
+        /** Версия 3: учёт загруженных дней и суммы по видам начислений. Старые дни загрузятся заново. */
+        private val migration2to3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `loaded_day` (`date` TEXT NOT NULL, `at` INTEGER NOT NULL, PRIMARY KEY(`date`))")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `acc_type` (`date` TEXT NOT NULL, `name` TEXT NOT NULL, `cls` TEXT NOT NULL, " +
+                        "`amount` REAL NOT NULL, `count` INTEGER NOT NULL, PRIMARY KEY(`date`, `name`))"
+                )
+            }
+        }
+
         fun get(context: Context): Db = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, Db::class.java, "marzha.db")
-                .addMigrations(migration1to2)
+                .addMigrations(migration1to2, migration2to3)
                 .fallbackToDestructiveMigration()
                 .build().also { instance = it }
         }

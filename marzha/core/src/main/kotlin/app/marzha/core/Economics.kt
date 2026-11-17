@@ -289,7 +289,10 @@ data class StockReport(
     val toBuySum: Double,
     /** Выручка, если продать весь остаток по текущим средним ценам. */
     val expectedRevenue: Double = 0.0,
-)
+) {
+    /** Сколько денег вернётся, если продать весь остаток: вложенное плюс прибыль. */
+    val moneyBack: Double get() = invested + expectedProfit
+}
 
 /**
  * Остатки и деньги в товаре. Скорость продаж и прибыль на штуку берутся из отчёта за последние дни
@@ -301,8 +304,10 @@ fun buildStockReport(
     products: Map<Long, Product>,
     costs: Map<Long, UnitCost>,
     settings: EconSettings,
+    /** Сколько дней из отчёта реально загружено; по умолчанию — все дни периода. */
+    loadedDays: Int? = null,
 ): StockReport {
-    val days = (ChronoUnit.DAYS.between(recent.from, recent.to) + 1).coerceAtLeast(1)
+    val days = (loadedDays ?: (ChronoUnit.DAYS.between(recent.from, recent.to) + 1).toInt()).coerceAtLeast(1)
     val bySku = recent.lines.associateBy { it.sku }
     val lines = stocks.filter { it.total > 0 || (bySku[it.sku]?.netQty ?: 0) > 0 }.map { s ->
         val line = bySku[s.sku]

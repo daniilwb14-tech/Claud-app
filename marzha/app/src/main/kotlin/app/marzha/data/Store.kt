@@ -78,16 +78,12 @@ class Store(context: Context) {
     val hasKeys: Boolean get() = clientId.isNotEmpty() && (p.getString("apiKey", "") ?: "").isNotEmpty()
     val hasPerf: Boolean get() = perfId.isNotEmpty() && (p.getString("perfSecret", "") ?: "").isNotEmpty()
 
-    /** Сплошной диапазон дней, за которые начисления уже загружены. */
-    var loadedFrom: LocalDate?
-        get() = p.getString("loadedFrom", null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-        set(v) = p.edit().putString("loadedFrom", v?.toString()).apply()
+    /** С какого дня продавец хочет видеть историю: по нему видно, каких дней не хватает. */
+    var historyFrom: LocalDate?
+        get() = p.getString("historyFrom", null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        set(v) = p.edit().putString("historyFrom", v?.toString()).apply()
 
-    var loadedTo: LocalDate?
-        get() = p.getString("loadedTo", null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-        set(v) = p.edit().putString("loadedTo", v?.toString()).apply()
-
-    /** Цветовая тема: GREEN или OZON. */
+    /** Цветовая тема: название из AppTheme. */
     var theme: String
         get() = p.getString("theme", "GREEN") ?: "GREEN"
         set(v) = p.edit().putString("theme", v).apply()

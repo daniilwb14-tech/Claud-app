@@ -82,6 +82,34 @@ class CoreTest {
     }
 
     @Test
+    fun payoutIsNotAnExpense() {
+        val t = FeeTypes.parse("""{"accrual_types":[{"id":1,"name":"Выплата продавцу"},{"id":2,"name":"Компенсация за доставку"},
+            {"id":3,"name":"Перечисление средств на расчётный счёт"}]}""")
+        assertEquals(FeeClass.TRANSFER, t.classOf(1))
+        assertTrue(t.classOf(2) != FeeClass.TRANSFER)
+        assertEquals(FeeClass.TRANSFER, t.classOf(3))
+        val page = parseAccruals(
+            """{"accruals":[{"date":"2026-11-10","total_amount":{"amount":"-500000"},"non_item_fee":{"type_id":1,"accrued":{"amount":"-500000"}}}]}""",
+            t, "2026-11-10",
+        )
+        // Выплата не попадает ни в одну статью и не считается «неразобранной».
+        assertTrue(page.rows.all { it.revenue + it.ozonTotal == 0.0 })
+        assertEquals(FeeClass.TRANSFER, page.types.single().cls)
+    }
+
+    @Test
+    fun accrualTypeTotals() {
+        val page = parseAccruals(accruals, types, "2026-11-15")
+        val byName = page.types.associateBy { it.name }
+        near(byName.getValue("Продажи (реализовано)").amount, 2000.0)
+        near(byName.getValue("Возвраты (реализовано)").amount, -1000.0)
+        near(byName.getValue("Логистика").amount, -270.0)
+        near(byName.getValue("Не разобрано (разница с итогом Ozon)").amount, -5.0)
+        // Сумма по видам равна сумме итогов Ozon.
+        near(page.types.sumOf { it.amount }, 730.0 - 550 - 120 - 300 - 50)
+    }
+
+    @Test
     fun accrualsBonusOnTopAndPositiveCommission() {
         // «Реализовано» без баллов, баллы начислены сверху, комиссия пришла положительным числом.
         val text = """{"accruals":[{"date":"2026-11-14","total_amount":{"amount":"1500"},
@@ -161,8 +189,9 @@ class CoreTest {
             }
         }
         val api = OzonClient(" cid ", "key", http)
-        val rows = api.accruals(LocalDate.of(2026, 11, 10), api.feeTypes())
+        val (rows, types) = api.accruals(LocalDate.of(2026, 11, 10), api.feeTypes())
         near(rows.single().ads, -15.0)
+        assertEquals(TypeTotal("Оплата за клик", FeeClass.ADS, -15.0, 2), types.single())
         assertEquals(3, calls.size)
     }
 
@@ -233,6 +262,10 @@ class CoreTest {
         assertEquals(30, l.toBuy)
         near(st.toBuySum, 3000.0)
         near(st.expectedRevenue, 30 * 1000.0)
+        near(st.moneyBack, 3000.0 + 12000.0)
+        // Если из 30 дней загружено только 10, скорость продаж считается по ним.
+        val partial = buildStockReport(listOf(Stock(1, fbo = 20, inTransit = 10)), rep, emptyMap(), costs, s, loadedDays = 10)
+        near(partial.lines.single().perDay, 6.0)
     }
 
     @Test

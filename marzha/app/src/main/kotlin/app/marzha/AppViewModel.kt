@@ -32,9 +32,13 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 enum class Period(val title: String) {
-    TODAY("Сегодня"), YESTERDAY("Вчера"), D7("7 дней"), D30("30 дней"), MONTH("Этот месяц"), PREV_MONTH("Прошлый месяц");
+    TODAY("Сегодня"), YESTERDAY("Вчера"), D7("7 дней"), D30("30 дней"), MONTH("Этот месяц"), PREV_MONTH("Прошлый месяц"),
+    CUSTOM("Свой период");
 
-    /** Границы периода. «7 дней» и «30 дней» — полные дни до вчера включительно, как в недельном отчёте. */
+    /**
+     * Границы периода. «7 дней» и «30 дней» — полные дни до вчера включительно, как в недельном отчёте.
+     * Для своего периода границы хранит модель экрана, здесь — запасной вариант.
+     */
     fun range(today: LocalDate): Pair<LocalDate, LocalDate> = when (this) {
         TODAY -> today to today
         YESTERDAY -> today.minusDays(1) to today.minusDays(1)
@@ -42,8 +46,17 @@ enum class Period(val title: String) {
         D30 -> today.minusDays(30) to today.minusDays(1)
         MONTH -> today.withDayOfMonth(1) to today
         PREV_MONTH -> today.minusMonths(1).withDayOfMonth(1) to today.withDayOfMonth(1).minusDays(1)
+        CUSTOM -> today.minusDays(7) to today.minusDays(1)
     }
 }
+
+/** Сколько дней периода загружено из Ozon. */
+data class Coverage(val loaded: Int, val total: Int, val firstMissing: LocalDate?) {
+    val complete: Boolean get() = loaded >= total
+}
+
+/** Начисления Ozon за период по видам — для экрана проверки. */
+data class TypeLine(val name: String, val cls: app.marzha.core.FeeClass, val amount: Double, val count: Int)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
@@ -77,7 +90,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var syncStatus by mutableStateOf("")
         private set
     var error by mutableStateOf<String?>(null)
-    var loadedFrom by mutableStateOf(store.loadedFrom)
+    var historyFrom by mutableStateOf(store.historyFrom)
+        private set
+
+    /** Итог последней загрузки одной строкой. */
+    var lastResult by mutableStateOf<String?>(null)
         private set
     var lastSync by mutableStateOf(store.lastSync)
         private set
@@ -94,6 +111,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var recomputeJob: Job? = null
+
+    /** Границы своего периода. */
+    var customFrom by mutableStateOf(LocalDate.now(MOSCOW).minusDays(14))
+        private set
+    var customTo by mutableStateOf(LocalDate.now(MOSCOW).minusDays(1))
+        private set
+
+    /** Дни, за которые начисления загружены. */
+    var loadedDays by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var coverage by mutableStateOf<Coverage?>(null)
+        private set
+    var typeLines by mutableStateOf<List<TypeLine>>(emptyList())
+        private set
+
+    /** Границы выбранного периода. */
+    fun range(): Pair<LocalDate, LocalDate> = if (period == Period.CUSTOM) customFrom to customTo else period.range(today())
+
+    fun chooseCustom(from: LocalDate, to: LocalDate) {
+        val today = today()
+        customFrom = minOf(from, to).coerceAtMost(today)
+        customTo = maxOf(from, to).coerceAtMost(today)
+        period = Period.CUSTOM
+        recompute()
+    }
 
     fun today(): LocalDate = LocalDate.now(MOSCOW)
 
@@ -115,7 +157,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         recomputeJob?.cancel()
         recomputeJob = viewModelScope.launch {
             val today = today()
-            val (from, to) = period.range(today)
+            val (from, to) = range()
             val recentFrom = today.minusDays(30)
             val recentTo = today.minusDays(1)
             val loadFrom = minOf(from, recentFrom).toString()
@@ -126,12 +168,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val fin = dao.fin(loadFrom, today.toString()).map { it.toCore() }
                 val orders = dao.orders(loadFrom, today.toString()).map { it.toCore() }
                 val s = store.settings
+                val loaded = if (demo) emptySet() else dao.loadedDays().toSet()
                 val rep = buildReport(from, to, fin, orders, products, costMap, exp, s)
                 val recent = buildReport(recentFrom, recentTo, fin, orders, products, costMap, exp, s)
-                val stock = buildStockReport(dao.stocks().map { it.toCore() }, recent, products, costMap, s)
+                // Скорость продаж — по загруженным дням, иначе пропуски в истории занижают её.
+                val recentLoaded = if (demo) null else countDays(recentFrom, recentTo) { it in loaded }
+                val stock = buildStockReport(dao.stocks().map { it.toCore() }, recent, products, costMap, s, recentLoaded?.coerceAtLeast(1))
                 val ads = campaigns(dao.ads(from.toString(), to.toString()).map { it.toCore() }, from, to)
-                Computed(rep, stock, ads, costMap, exp)
+                val types = dao.accTypes(from.toString(), to.toString())
+                    .groupBy { it.name }
+                    .map { (name, rows) ->
+                        TypeLine(
+                            name, runCatching { app.marzha.core.FeeClass.valueOf(rows.first().cls) }.getOrDefault(app.marzha.core.FeeClass.OTHER),
+                            rows.sumOf { it.amount }, rows.sumOf { it.count },
+                        )
+                    }
+                    .sortedByDescending { kotlin.math.abs(it.amount) }
+                // Сегодняшний день всегда неполный, его в покрытие не считаем.
+                val last = minOf(to, today.minusDays(1))
+                val cov = if (demo || last.isBefore(from)) null else {
+                    var first: LocalDate? = null
+                    val n = countDays(from, last) { d -> (d in loaded).also { ok -> if (!ok && first == null) first = LocalDate.parse(d) } }
+                    Coverage(n, countDays(from, last) { true }, first)
+                }
+                Computed(rep, stock, ads, costMap, exp, loaded, cov, types)
             }
+            loadedDays = result.loaded
+            coverage = result.coverage
+            typeLines = result.types
             report = result.report
             stockReport = result.stock
             campaignLines = result.ads
@@ -143,7 +207,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private class Computed(
         val report: Report, val stock: StockReport, val ads: List<CampaignLine>,
         val costs: Map<Long, UnitCost>, val expenses: List<Expense>,
+        val loaded: Set<String>, val coverage: Coverage?, val types: List<TypeLine>,
     )
+
+    private fun countDays(from: LocalDate, to: LocalDate, ok: (String) -> Boolean): Int {
+        var n = 0
+        var d = from
+        while (!d.isAfter(to)) {
+            if (ok(d.toString())) n++
+            d = d.plusDays(1)
+        }
+        return n
+    }
+
+    /** Догружает недостающие дни выбранного периода. */
+    fun loadPeriod() = sync(range().first)
 
     /** Загружает данные из Ozon. [from] — с какого дня нужна история; по умолчанию как уже загружено. */
     fun sync(from: LocalDate? = null) {
@@ -153,14 +231,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val today = today()
-        val want = from ?: store.loadedFrom ?: today.minusDays(initialDays)
+        // С какого дня нужна история: запрошенный, иначе уже выбранная глубина, иначе 35 дней.
+        val want = minOf(from ?: today, store.historyFrom ?: today.minusDays(initialDays))
         syncing = true
         error = null
         syncStatus = "Подключаемся к Ozon…"
         viewModelScope.launch {
             var lastShown = 0L
             try {
-                val warning = withContext(Dispatchers.IO) {
+                val result = withContext(Dispatchers.IO) {
                     sync.run(want, today) { msg ->
                         viewModelScope.launch {
                             syncStatus = msg
@@ -173,13 +252,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
-                error = warning
+                error = result.warning
+                lastResult = when {
+                    result.daysFailed.isEmpty() -> "Готово: загружено дней — ${result.daysLoaded}."
+                    else -> "Загружено дней — ${result.daysLoaded}, не загрузилось — ${result.daysFailed.size}."
+                }
             } catch (e: Exception) {
                 error = describeError(e)
             } finally {
                 syncing = false
                 syncStatus = ""
-                loadedFrom = store.loadedFrom
+                historyFrom = store.historyFrom
                 lastSync = store.lastSync
                 recompute()
             }
@@ -198,7 +281,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (err == null) {
-                if (demo) withContext(Dispatchers.IO) { wipeData() }
+                // Другой кабинет или выход из демо — старые данные не должны смешиваться с новыми.
+                if (demo || (store.clientId.isNotEmpty() && store.clientId != id.trim())) withContext(Dispatchers.IO) { wipeData() }
                 store.demo = false
                 demo = false
                 store.clientId = id
@@ -236,11 +320,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             store.demo = true
-            store.loadedFrom = today.minusDays(62)
-            store.loadedTo = today
+            store.historyFrom = today.minusDays(62)
             store.lastSync = System.currentTimeMillis()
             demo = true
-            loadedFrom = store.loadedFrom
+            historyFrom = store.historyFrom
             lastSync = store.lastSync
             connected = true
             recompute()
@@ -249,8 +332,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun wipeData() {
         db.clearAllTables()
-        store.loadedFrom = null
-        store.loadedTo = null
+        store.historyFrom = null
         store.lastSync = 0
     }
 
@@ -268,7 +350,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             costs = emptyMap()
             expenses = emptyList()
             settings = store.settings
-            loadedFrom = null
+            historyFrom = null
+            lastResult = null
             lastSync = 0
             clientId = ""
             hasPerf = false

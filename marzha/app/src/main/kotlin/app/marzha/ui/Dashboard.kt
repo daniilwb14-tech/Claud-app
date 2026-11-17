@@ -80,46 +80,13 @@ fun DashboardScreen(
                 }
             }
         }
-        item { PeriodChips(vm.period, vm::choosePeriod) }
+        item { PeriodChips(vm) }
 
-        if (vm.syncing) item {
-            Panel(Modifier.padding(horizontal = 16.dp)) {
-                Text("Загружаем данные из Ozon", fontWeight = FontWeight.SemiBold)
-                Hint(vm.syncStatus)
-                Spacer(Modifier.height(10.dp))
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                Hint("Первая загрузка идёт дольше всего. Цифры появляются по мере загрузки.", Modifier.padding(top = 8.dp))
-            }
-        }
-        vm.error?.let { msg ->
-            item {
-                Panel(Modifier.padding(horizontal = 16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Warning, contentDescription = null, tint = lossColor)
-                        Spacer(Modifier.width(10.dp))
-                        Text(msg, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { vm.error = null }) { Text("Скрыть") }
-                        TextButton(onClick = { vm.sync() }, enabled = !vm.syncing) { Text("Повторить") }
-                    }
-                }
-            }
-        }
+        item { SyncBanner(vm, Modifier.padding(horizontal = 16.dp)) }
 
         if (report == null) {
             item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
             return@LazyColumn
-        }
-
-        // Период шире загруженной истории.
-        val loaded = vm.loadedFrom
-        if (!vm.demo && loaded != null && report.from.isBefore(loaded) && !vm.syncing) item {
-            Panel(Modifier.padding(horizontal = 16.dp)) {
-                Text("За этот период загружено не всё", fontWeight = FontWeight.SemiBold)
-                Hint("История есть с ${dayMonth(loaded)}, а период начинается ${dayMonth(report.from)}.")
-                TextButton(onClick = { vm.sync(report.from) }) { Text("Загрузить с ${dayMonth(report.from)}") }
-            }
         }
 
         item { ProfitHero(report, Modifier.padding(horizontal = 16.dp)) }

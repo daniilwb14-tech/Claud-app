@@ -20,7 +20,7 @@ fun interface Transport {
 }
 
 /** Обычный HTTP с повтором при лимите запросов (429) и сбоях сервера (5xx). */
-class HttpTransport(private val attempts: Int = 5) : Transport {
+class HttpTransport(private val attempts: Int = 7) : Transport {
     override fun request(method: String, url: String, headers: Map<String, String>, body: String?): String {
         var last: Exception? = null
         for (i in 0 until attempts) {
@@ -43,7 +43,8 @@ class HttpTransport(private val attempts: Int = 5) : Transport {
                 val e = ApiException(code, text.take(400))
                 if (code == 429 || code >= 500) {
                     last = e
-                    Thread.sleep(1500L * (i + 1))
+                    // Ozon ограничивает частоту запросов: ждём всё дольше, до полуминуты.
+                    Thread.sleep(minOf(30_000L, 2000L shl i))
                     continue
                 }
                 throw e
@@ -146,9 +147,10 @@ class OzonClient(
     /** Справочник видов начислений. */
     fun feeTypes(): FeeTypes = FeeTypes.parse(post("/v1/finance/accrual/types", buildJsonObject { }))
 
-    /** Начисления за один день (по дате начисления Ozon), свёрнутые по товарам. */
-    fun accruals(date: LocalDate, types: FeeTypes): List<FinDay> {
+    /** Начисления за один день (по дате начисления Ozon), свёрнутые по товарам, и суммы по видам начислений. */
+    fun accruals(date: LocalDate, types: FeeTypes): Pair<List<FinDay>, List<TypeTotal>> {
         val acc = FinAccumulator()
+        val tt = TypeAccumulator()
         var lastId = ""
         var dateArg = date.toString()
         for (page in 0 until 5000) {
@@ -163,6 +165,7 @@ class OzonClient(
             }
             val p = parseAccruals(text, types, date.toString())
             p.rows.forEach(acc::add)
+            tt.addAll(p.types)
             if (p.count == 0 || p.lastId.isEmpty() || p.lastId == lastId) break
             lastId = p.lastId
         }
@@ -170,7 +173,7 @@ class OzonClient(
         val day = date.toString()
         val out = FinAccumulator()
         acc.rows().forEach { out.add(it.copy(date = day)) }
-        return out.rows()
+        return out.rows() to tt.list()
     }
 
     /** Заказы FBO и FBS за дни [from; to] по московскому времени. */

@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -33,22 +34,34 @@ import app.marzha.core.expensesFor
 import app.marzha.core.reportCsv
 
 @Composable
-fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
+fun MoreScreen(vm: AppViewModel, openAds: () -> Unit, openSupport: () -> Unit, openCheck: () -> Unit) {
     val context = LocalContext.current
     var editExpense by remember { mutableStateOf<Expense?>(null) }
     var showKeys by remember { mutableStateOf(false) }
     var showPerf by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
+    var explainCsv by remember { mutableStateOf(false) }
     val s = vm.settings
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Настройки", Modifier.padding(start = 4.dp, top = 16.dp), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+        item {
+            Panel(onClick = openSupport) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Написать в поддержку", fontWeight = FontWeight.SemiBold)
+                        Hint("Вопрос, ошибка в цифрах или идея — ответим на почту.")
+                    }
+                    Text("›", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                }
+            }
+        }
 
         // ── Оформление ──
         item { SectionTitle("Цветовая гамма") }
-        item {
+        items(AppTheme.entries.chunked(2)) { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                for (t in AppTheme.entries) {
+                for (t in pair) {
                     val selected = vm.theme == t.name
                     Surface(
                         onClick = { vm.chooseTheme(t.name) },
@@ -67,8 +80,10 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
                         }
                     }
                 }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
+        item { Hint("Тёмный вариант каждой гаммы включается вместе с тёмной темой телефона.", Modifier.padding(start = 4.dp)) }
 
         // ── Налог и ставки ──
         item { SectionTitle("Налог и ставки") }
@@ -165,14 +180,19 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
 
         // ── Данные ──
         item { SectionTitle("Данные") }
+        item { SyncBanner(vm) }
         item {
             Panel {
-                vm.loadedFrom?.let { Line("История загружена с", dayMonth(it) + "." + it.year) }
+                vm.historyFrom?.let { Line("История загружается с", dayMonth(it) + "." + it.year) }
+                vm.coverage?.let { c -> Line("Загружено дней в выбранном периоде", "${c.loaded} из ${c.total}") }
+                vm.lastResult?.let { Hint(it, Modifier.padding(vertical = 4.dp)) }
                 if (!vm.demo) {
-                    TextButton(onClick = { vm.sync() }, enabled = !vm.syncing) { Text(if (vm.syncing) "Идёт загрузка…" else "Обновить сейчас") }
+                    TextButton(onClick = { vm.sync() }, enabled = !vm.syncing) { Text(if (vm.syncing) "Идёт загрузка…" else "Обновить и догрузить пропущенные дни") }
                     TextButton(onClick = { vm.sync(vm.today().minusDays(92)) }, enabled = !vm.syncing) { Text("Загрузить историю за 3 месяца") }
+                    Hint("Три месяца — это около 90 запросов к Ozon по дню на каждый, обычно 5–15 минут. Ход загрузки виден здесь и на сводке.")
                 }
-                TextButton(onClick = { vm.report?.let { shareCsv(context, reportCsv(it)) } }, enabled = vm.report != null) { Text("Выгрузить отчёт по товарам (CSV)") }
+                TextButton(onClick = openCheck, enabled = vm.report != null) { Text("Проверка данных: начисления Ozon по видам и дням") }
+                TextButton(onClick = { explainCsv = true }, enabled = vm.report != null) { Text("Выгрузить отчёт по товарам (CSV)") }
                 TextButton(onClick = { confirmLogout = true }, enabled = !vm.syncing) {
                     Text(if (vm.demo) "Выйти из демо" else "Выйти и стереть данные с телефона", color = lossColor)
                 }
@@ -193,6 +213,33 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit) {
         ExpenseDialog(e, today = vm.today().toString(), onDismiss = { editExpense = null }, onSave = { vm.saveExpense(it); editExpense = null }, onDelete = { vm.deleteExpense(e.id); editExpense = null })
     }
     if (showKeys) KeysDialog(vm, onDismiss = { showKeys = false })
+    if (explainCsv) vm.report?.let { r ->
+        AlertDialog(
+            onDismissRequest = { explainCsv = false },
+            title = { Text("Отчёт по товарам") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Таблица юнит-экономики за ${dayMonth(r.from)}–${dayMonth(r.to)} — тот же расчёт, что на экране «Товары».")
+                    Hint(
+                        "Строка — товар, последняя строка — итог. Столбцы: артикул, название, SKU, заказано, выкуплено, возвраты, " +
+                            "выкуплено в рублях, оплатили клиенты, комиссия, логистика, обратная логистика, реклама, хранение, эквайринг, " +
+                            "кросс-докинг, прочие удержания, закупка, маркировка, упаковка, прочая себестоимость, налог, менеджер, " +
+                            "свои расходы, чистая прибыль, маржа и прибыль на 1 шт."
+                    )
+                    Hint("Период — тот, что выбран сейчас на сводке. Чтобы выгрузить другой, смените период и вернитесь сюда.")
+                    Text("Как открыть", fontWeight = FontWeight.SemiBold)
+                    Hint(
+                        "Нажмите «Отправить» и выберите, куда сохранить файл: себе в Telegram, на почту, в Google Диск или в «Файлы». " +
+                            "Дальше откройте его в Excel или Google Таблицах (Файл → Импорт). Разделитель — точка с запятой, кириллица отображается правильно."
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { explainCsv = false; shareCsv(context, reportCsv(r), "marzha_${r.from}_${r.to}.csv") }) { Text("Отправить") }
+            },
+            dismissButton = { TextButton(onClick = { explainCsv = false }) { Text("Отмена") } },
+        )
+    }
     if (showPerf) PerfDialog(onDismiss = { showPerf = false }, onSave = { id, secret -> vm.savePerformanceKeys(id, secret); showPerf = false })
     if (confirmLogout) AlertDialog(
         onDismissRequest = { confirmLogout = false },
@@ -234,7 +281,9 @@ private val formulas: List<Pair<String, String>> = listOf(
         "• хранение, эквайринг, кросс-докинг — отдельными статьями;\n" +
         "• прочие начисления — всё остальное.\n" +
         "Каждое начисление сверяется со своим итогом: если части не сошлись, остаток уходит в «прочие». " +
-        "Так сумма статей всегда равна тому, что начислил Ozon.",
+        "Так сумма статей всегда равна тому, что начислил Ozon.\n" +
+        "Выплаты на ваш расчётный счёт — это не расход, в прибыль они не входят. " +
+        "Все виды начислений с суммами можно посмотреть в «Настройки → Данные → Проверка данных».",
     "К выплате от Ozon" to
         "К выплате = выкуплено, ₽ + все удержания Ozon (они отрицательные).\n" +
         "«Удержано, %» = удержания Ozon ÷ выкуплено, ₽.\n" +
@@ -269,26 +318,36 @@ private val formulas: List<Pair<String, String>> = listOf(
         "Остаток = склады Ozon + свой склад (FBS) + в пути на склад (поставки и заявки) + возвраты от покупателей, " +
         "которые едут обратно на склад и снова пойдут в продажу.\n" +
         "Вложено в товар = остаток × себестоимость 1 шт.\n" +
-        "Продаж в день = выкуплено, шт за последние 30 дней ÷ 30.\n" +
+        "Продаж в день = выкуплено, шт за последние 30 дней ÷ число загруженных дней из этих 30.\n" +
         "Хватит на = остаток ÷ продаж в день.\n" +
-        "Выручка, если продать всё = остаток × средний чек за 30 дней.\n" +
         "Принесёт чистой прибыли = остаток × прибыль на 1 шт за 30 дней.\n" +
+        "Вернётся денег = вложено в товар + принесёт чистой прибыли: сколько окажется у вас после продажи всего остатка.\n" +
+        "Выручка, если продать всё = остаток × средний чек за 30 дней (с баллами Ozon, до удержаний).\n" +
         "Докупить = продаж в день × целевой запас в днях − остаток (если больше нуля).\n" +
         "Цвета: красный — хватит меньше чем на 7 дней, жёлтый — меньше чем на 14, зелёный — запас есть, " +
         "синий — больше 90 дней, серый — продаж нет.",
     "Периоды" to
         "«7 дней» и «30 дней» — полные дни до вчерашнего включительно. «Этот месяц» — с 1-го числа по сегодня. " +
+        "«Свой период» — любые даты из календаря. Если какие-то дни периода ещё не загружены, сверху появится предупреждение. " +
         "Сегодняшние начисления Ozon неполные и дополняются в течение нескольких дней, поэтому три последних дня " +
         "при каждом обновлении загружаются заново.",
 )
 
-private fun shareCsv(context: Context, csv: String) {
+/** Сохраняет отчёт файлом и открывает «Поделиться»: так Excel и Google Таблицы откроют его как таблицу. */
+private fun shareCsv(context: Context, csv: String, fileName: String) {
+    val dir = java.io.File(context.cacheDir, "reports").apply { mkdirs() }
+    dir.listFiles()?.forEach { it.delete() }
+    val file = java.io.File(dir, fileName)
+    // Метка BOM нужна Excel, чтобы он понял кодировку UTF-8 и не исказил кириллицу.
+    file.writeText("\uFEFF" + csv, Charsets.UTF_8)
+    val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
+        type = "text/csv"
         putExtra(Intent.EXTRA_SUBJECT, "Юнит-экономика Ozon")
-        putExtra(Intent.EXTRA_TEXT, csv)
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, "Отправить отчёт"))
+    context.startActivity(Intent.createChooser(intent, "Куда отправить отчёт"))
 }
 
 @Composable
@@ -404,7 +463,7 @@ private fun ScreenHeader(title: String, back: () -> Unit) {
 fun AdsScreen(vm: AppViewModel, back: () -> Unit, openProduct: (Long) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Реклама", back)
-        PeriodChips(vm.period, vm::choosePeriod)
+        PeriodChips(vm)
         val report = vm.report
         val products = report?.lines.orEmpty().filter { it.sku != 0L && it.b.ads < -0.5 }.sortedBy { it.b.ads }
         val campaigns = vm.campaignLines
@@ -453,10 +512,10 @@ fun AdsScreen(vm: AppViewModel, back: () -> Unit, openProduct: (Long) -> Unit) {
 
 /** Начисления к выплате: из чего складывается сумма и как она набиралась по дням. */
 @Composable
-fun PayoutScreen(vm: AppViewModel, back: () -> Unit) {
+fun PayoutScreen(vm: AppViewModel, back: () -> Unit, openCheck: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("К выплате от Ozon", back)
-        PeriodChips(vm.period, vm::choosePeriod)
+        PeriodChips(vm)
         val report = vm.report
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (report == null) return@LazyColumn
@@ -477,6 +536,7 @@ fun PayoutScreen(vm: AppViewModel, back: () -> Unit) {
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     Line("К выплате", rub(b.payout), valueColor = signColor(b.payout), bold = true, sub = if (b.revenue > 0) "остаётся ${pct(b.payout / b.revenue)} от выкупов" else "")
                     Hint("Это начислено Ozon за период, а не переведено на счёт: выплаты Ozon делает по своему графику.", Modifier.padding(top = 6.dp))
+                    TextButton(onClick = openCheck) { Text("Все начисления по видам и дням") }
                 }
             }
             val days = report.daily.filter { it.revenue != 0.0 || it.ozon != 0.0 }.reversed()

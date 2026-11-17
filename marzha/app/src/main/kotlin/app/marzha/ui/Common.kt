@@ -30,7 +30,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.marzha.AppViewModel
 import app.marzha.Period
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import app.marzha.core.Product
 import coil.compose.AsyncImage
 import java.text.DecimalFormat
@@ -60,7 +67,11 @@ val LocalPalette = staticCompositionLocalOf {
 /** Цветовые темы приложения. */
 enum class AppTheme(val title: String, val swatch: List<Color>) {
     GREEN("Зелёная", listOf(Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166))),
-    OZON("Сине-розовая", listOf(Color(0xFF005BFF), Color(0xFFF91155), Color(0xFF001A34)));
+    OZON("Сине-розовая", listOf(Color(0xFF005BFF), Color(0xFFF91155), Color(0xFF001A34))),
+    VIOLET("Фиолетовая", listOf(Color(0xFF6A3DE8), Color(0xFF3B1E9E), Color(0xFFFFB347))),
+    SUNSET("Закат", listOf(Color(0xFFE8590C), Color(0xFFC2255C), Color(0xFFFFE066))),
+    GRAPHITE("Графит", listOf(Color(0xFF1F2933), Color(0xFF52606D), Color(0xFF3EBD93))),
+    OCEAN("Морская", listOf(Color(0xFF0B7285), Color(0xFF1864AB), Color(0xFF63E6BE)));
 
     companion object {
         fun of(name: String): AppTheme = entries.firstOrNull { it.name == name } ?: GREEN
@@ -120,20 +131,69 @@ private val OzonDark = darkColorScheme(
     error = Color(0xFFFF5C8A),
 )
 
+/** Светлая и тёмная схемы из трёх цветов: основной, тёмный для плашки и акцент. */
+private fun schemeOf(primary: Color, dark: Boolean, tint: Color): ColorScheme =
+    if (!dark) lightColorScheme(
+        primary = primary, onPrimary = Color.White,
+        primaryContainer = tint, onPrimaryContainer = Color(0xFF14141A),
+        secondaryContainer = tint, onSecondaryContainer = Color(0xFF14141A),
+        background = Color(0xFFF4F5F7), onBackground = Color(0xFF17181C),
+        surface = Color.White, onSurface = Color(0xFF17181C),
+        surfaceVariant = Color(0xFFEAECEF), onSurfaceVariant = Color(0xFF5E6470),
+        surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFF0F1F4), surfaceContainerHighest = Color(0xFFEAECEF),
+        outline = Color(0xFFBCC1C9), outlineVariant = Color(0xFFDDE0E5),
+        error = Color(0xFFD13A3A),
+    ) else darkColorScheme(
+        primary = primary, onPrimary = Color(0xFF101114),
+        primaryContainer = Color(0xFF2A2D35), onPrimaryContainer = Color(0xFFE6E8EC),
+        secondaryContainer = Color(0xFF2A2D35), onSecondaryContainer = Color(0xFFE6E8EC),
+        background = Color(0xFF0F1013), onBackground = Color(0xFFE6E8EC),
+        surface = Color(0xFF181A1F), onSurface = Color(0xFFE6E8EC),
+        surfaceVariant = Color(0xFF242730), onSurfaceVariant = Color(0xFFA0A6B1),
+        surfaceContainer = Color(0xFF181A1F), surfaceContainerHigh = Color(0xFF1F2228), surfaceContainerHighest = Color(0xFF242730),
+        outline = Color(0xFF545A66), outlineVariant = Color(0xFF2C3038),
+        error = Color(0xFFFF8A80),
+    )
+
 @Composable
 fun MarzhaTheme(theme: AppTheme = AppTheme.GREEN, content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
-    val scheme = when (theme) {
-        AppTheme.GREEN -> if (dark) GreenDark else GreenLight
-        AppTheme.OZON -> if (dark) OzonDark else OzonLight
-    }
-    val palette = when (theme) {
-        AppTheme.GREEN ->
-            if (dark) Palette(Color(0xFF6FD9B8), Color(0xFFFF8A80), Color(0xFFFFC56B), Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), Color(0xFF6FD9B8))
-            else Palette(Color(0xFF0E8F5B), Color(0xFFD13A3A), Color(0xFFB26A00), Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), Color(0xFF0B6E5B))
-        AppTheme.OZON ->
-            if (dark) Palette(Color(0xFF4CD08A), Color(0xFFFF5C8A), Color(0xFFFFC56B), Color(0xFF005BFF), Color(0xFF0034B8), Color(0xFFFF5C8A), Color(0xFF5C96FF))
-            else Palette(Color(0xFF00A650), Color(0xFFF91155), Color(0xFFB26A00), Color(0xFF005BFF), Color(0xFF0034B8), Color(0xFFFF7AA2), Color(0xFF005BFF))
+    val okL = Color(0xFF0E8F5B); val okD = Color(0xFF6FD9B8)
+    val badL = Color(0xFFD13A3A); val badD = Color(0xFFFF8A80)
+    val warnL = Color(0xFFB26A00); val warnD = Color(0xFFFFC56B)
+    val scheme: ColorScheme
+    val palette: Palette
+    when (theme) {
+        AppTheme.GREEN -> {
+            scheme = if (dark) GreenDark else GreenLight
+            palette = if (dark) Palette(okD, badD, warnD, Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), okD)
+            else Palette(okL, badL, warnL, Color(0xFF0B6E5B), Color(0xFF0A4F5E), Color(0xFFFFD166), Color(0xFF0B6E5B))
+        }
+        AppTheme.OZON -> {
+            scheme = if (dark) OzonDark else OzonLight
+            palette = if (dark) Palette(Color(0xFF4CD08A), Color(0xFFFF5C8A), warnD, Color(0xFF005BFF), Color(0xFF0034B8), Color(0xFFFF5C8A), Color(0xFF5C96FF))
+            else Palette(Color(0xFF00A650), Color(0xFFF91155), warnL, Color(0xFF005BFF), Color(0xFF0034B8), Color(0xFFFF7AA2), Color(0xFF005BFF))
+        }
+        AppTheme.VIOLET -> {
+            scheme = schemeOf(if (dark) Color(0xFFA98BFF) else Color(0xFF6A3DE8), dark, Color(0xFFE9E2FF))
+            palette = Palette(if (dark) okD else okL, if (dark) badD else badL, if (dark) warnD else warnL,
+                Color(0xFF6A3DE8), Color(0xFF3B1E9E), Color(0xFFFFB347), if (dark) Color(0xFFA98BFF) else Color(0xFF6A3DE8))
+        }
+        AppTheme.SUNSET -> {
+            scheme = schemeOf(if (dark) Color(0xFFFF8C42) else Color(0xFFE8590C), dark, Color(0xFFFFE8D9))
+            palette = Palette(if (dark) okD else okL, if (dark) Color(0xFFFF6B8B) else Color(0xFFC2255C), if (dark) warnD else Color(0xFFB26A00),
+                Color(0xFFE8590C), Color(0xFFC2255C), Color(0xFFFFE066), if (dark) Color(0xFFFF8C42) else Color(0xFFE8590C))
+        }
+        AppTheme.GRAPHITE -> {
+            scheme = schemeOf(if (dark) Color(0xFFCBD2D9) else Color(0xFF1F2933), dark, Color(0xFFE4E7EB))
+            palette = Palette(if (dark) Color(0xFF3EBD93) else Color(0xFF199473), if (dark) badD else badL, if (dark) warnD else warnL,
+                Color(0xFF1F2933), Color(0xFF3E4C59), Color(0xFF3EBD93), if (dark) Color(0xFF9AA5B1) else Color(0xFF3E4C59))
+        }
+        AppTheme.OCEAN -> {
+            scheme = schemeOf(if (dark) Color(0xFF66D9E8) else Color(0xFF0B7285), dark, Color(0xFFD5F3F8))
+            palette = Palette(if (dark) okD else okL, if (dark) badD else badL, if (dark) warnD else warnL,
+                Color(0xFF0B7285), Color(0xFF1864AB), Color(0xFF63E6BE), if (dark) Color(0xFF66D9E8) else Color(0xFF0B7285))
+        }
     }
     CompositionLocalProvider(LocalPalette provides palette) {
         MaterialTheme(colorScheme = scheme, content = content)
@@ -264,11 +324,103 @@ fun Line(label: String, value: String, valueColor: Color = Color.Unspecified, bo
     }
 }
 
+/** Выбор периода; «Свой период» открывает календарь с выбором первого и последнего дня. */
 @Composable
-fun PeriodChips(selected: Period, onSelect: (Period) -> Unit, modifier: Modifier = Modifier) {
+fun PeriodChips(vm: AppViewModel, modifier: Modifier = Modifier) {
+    var pick by remember { mutableStateOf(false) }
     Row(modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (p in Period.entries) {
-            FilterChip(selected = p == selected, onClick = { onSelect(p) }, label = { Text(p.title) })
+            val label = if (p == Period.CUSTOM && vm.period == Period.CUSTOM) "${dayMonth(vm.customFrom)}–${dayMonth(vm.customTo)}" else p.title
+            FilterChip(
+                selected = p == vm.period,
+                onClick = { if (p == Period.CUSTOM) pick = true else vm.choosePeriod(p) },
+                label = { Text(label) },
+            )
+        }
+    }
+    if (pick) PeriodPicker(vm, onDismiss = { pick = false })
+}
+
+@Composable
+private fun PeriodPicker(vm: AppViewModel, onDismiss: () -> Unit) {
+    val utc = java.time.ZoneOffset.UTC
+    val today = vm.today()
+    val todayMs = today.atStartOfDay(utc).toInstant().toEpochMilli()
+    val state = rememberDateRangePickerState(
+        initialSelectedStartDateMillis = vm.customFrom.atStartOfDay(utc).toInstant().toEpochMilli(),
+        initialSelectedEndDateMillis = vm.customTo.atStartOfDay(utc).toInstant().toEpochMilli(),
+        yearRange = 2022..today.year,
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= todayMs
+        },
+    )
+    fun date(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(utc).toLocalDate()
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val a = state.selectedStartDateMillis
+                    if (a != null) vm.chooseCustom(date(a), date(state.selectedEndDateMillis ?: a))
+                    onDismiss()
+                },
+                enabled = state.selectedStartDateMillis != null,
+            ) { Text("Показать") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    ) {
+        DateRangePicker(
+            state = state,
+            title = { Text("Свой период", Modifier.padding(start = 24.dp, top = 16.dp)) },
+            headline = {
+                val a = state.selectedStartDateMillis?.let { dayMonth(date(it)) } ?: "начало"
+                val b = state.selectedEndDateMillis?.let { dayMonth(date(it)) } ?: "конец"
+                Text("$a — $b", Modifier.padding(start = 24.dp, bottom = 8.dp), style = MaterialTheme.typography.titleLarge)
+            },
+            showModeToggle = false,
+            modifier = Modifier.heightIn(max = 520.dp),
+        )
+    }
+}
+
+/**
+ * Плашка о загрузке: идёт ли она, чем закончилась, все ли дни периода загружены.
+ * Видна и на сводке, и в настройках, чтобы нажатие «Загрузить» никогда не проходило молча.
+ */
+@Composable
+fun SyncBanner(vm: AppViewModel, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (vm.syncing) Panel {
+            Text("Загружаем данные из Ozon", fontWeight = FontWeight.SemiBold)
+            Hint(vm.syncStatus)
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Hint("Можно пользоваться приложением: цифры обновляются по мере загрузки.", Modifier.padding(top = 8.dp))
+        }
+        vm.error?.let { msg ->
+            Panel {
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Filled.Warning, contentDescription = null, tint = lossColor)
+                    Spacer(Modifier.width(10.dp))
+                    Text(msg, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { vm.error = null }) { Text("Скрыть") }
+                    TextButton(onClick = { vm.sync() }, enabled = !vm.syncing) { Text("Догрузить") }
+                }
+            }
+        }
+        val cov = vm.coverage
+        if (cov != null && !cov.complete && !vm.syncing) Panel {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = warnColor)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Загружено ${cov.loaded} из ${cov.total} дн. периода", fontWeight = FontWeight.SemiBold)
+                    Hint("Пока не загружены все дни, прибыль за период занижена.")
+                }
+            }
+            TextButton(onClick = { vm.loadPeriod() }) { Text("Загрузить недостающие дни") }
         }
     }
 }
