@@ -1,10 +1,13 @@
 package app.marzha.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -28,6 +31,38 @@ import app.marzha.core.SkuReport
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** Название текущего кабинета; нажатие открывает список кабинетов. */
+@Composable
+private fun ProfileSwitcher(vm: AppViewModel) {
+    var open by remember { mutableStateOf(false) }
+    var add by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.clip(RoundedCornerShape(10.dp)).clickable { open = true }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(vm.profile.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Выбрать кабинет")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            vm.profiles.forEach { p ->
+                DropdownMenuItem(
+                    text = { Text(p.name, fontWeight = if (p.id == vm.profile.id) FontWeight.SemiBold else FontWeight.Normal) },
+                    leadingIcon = { RadioButton(selected = p.id == vm.profile.id, onClick = null) },
+                    onClick = { open = false; vm.switchProfile(p.id) },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Добавить кабинет") },
+                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                onClick = { open = false; add = true },
+            )
+        }
+    }
+    if (add) AddProfileDialog(vm, onDismiss = { add = false })
+}
 
 /** Статьи расходов для списка «Куда уходят деньги». */
 fun costRows(b: Breakdown): List<Pair<String, Double>> = listOf(
@@ -66,7 +101,7 @@ fun DashboardScreen(
         item {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Маржа", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    ProfileSwitcher(vm)
                     Hint(
                         when {
                             vm.demo -> "Демо-кабинет · данные выдуманы"

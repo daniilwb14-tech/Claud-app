@@ -52,8 +52,9 @@ private object Vault {
 }
 
 /** Настройки и ключи доступа. API-ключи лежат только на устройстве и только в зашифрованном виде. */
-class Store(context: Context) {
-    private val p = context.getSharedPreferences("marzha", Context.MODE_PRIVATE)
+/** Настройки одного кабинета. [prefsName] — свой файл у каждого кабинета. */
+class Store(context: Context, prefsName: String = "marzha") {
+    private val p = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
     var clientId: String
         get() = p.getString("clientId", "") ?: ""
@@ -83,11 +84,6 @@ class Store(context: Context) {
         get() = p.getString("historyFrom", null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         set(v) = p.edit().putString("historyFrom", v?.toString()).apply()
 
-    /** Цветовая тема: название из AppTheme. */
-    var theme: String
-        get() = p.getString("theme", "GREEN") ?: "GREEN"
-        set(v) = p.edit().putString("theme", v).apply()
-
     /** Версия правил разбора. Когда правила меняются, уже загруженные дни нужно скачать заново. */
     var dataVersion: Int
         get() = p.getInt("dataVersion", 0)
@@ -114,9 +110,6 @@ class Store(context: Context) {
     /** Ставки хранятся как float; округляем, чтобы 6,3 не превращалось в 6,300000190734863. */
     private fun round2(v: Float): Double = Math.round(v * 100.0) / 100.0
 
-    /** Стирает ключи и настройки расчёта; выбранная тема оформления остаётся. */
-    fun clear() {
-        val keep = theme
-        p.edit().clear().putString("theme", keep).apply()
-    }
+    /** Стирает ключи и настройки расчёта этого кабинета. */
+    fun clear() = p.edit().clear().apply()
 }

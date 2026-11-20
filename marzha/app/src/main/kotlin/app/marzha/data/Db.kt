@@ -128,9 +128,6 @@ abstract class Db : RoomDatabase() {
     abstract fun dao(): AppDao
 
     companion object {
-        @Volatile
-        private var instance: Db? = null
-
         /** Версия 4: сколько из заказанного уже доставлено — для честного процента выкупа. */
         private val migration3to4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -156,11 +153,19 @@ abstract class Db : RoomDatabase() {
             }
         }
 
-        fun get(context: Context): Db = instance ?: synchronized(this) {
-            instance ?: Room.databaseBuilder(context.applicationContext, Db::class.java, "marzha.db")
-                .addMigrations(migration1to2, migration2to3, migration3to4)
-                .fallbackToDestructiveMigration()
-                .build().also { instance = it }
+        private val instances = HashMap<String, Db>()
+
+        /** База кабинета: у каждого кабинета свой файл. */
+        fun get(context: Context, name: String = "marzha.db"): Db = synchronized(this) {
+            instances.getOrPut(name) {
+                Room.databaseBuilder(context.applicationContext, Db::class.java, name)
+                    .addMigrations(migration1to2, migration2to3, migration3to4)
+                    .fallbackToDestructiveMigration()
+                    .build()
+            }
         }
+
+        /** Закрывает базу перед удалением её файла. */
+        fun close(name: String) = synchronized(this) { instances.remove(name)?.close() }
     }
 }

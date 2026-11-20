@@ -21,6 +21,7 @@ import app.marzha.core.campaigns
 import app.marzha.core.demoData
 import app.marzha.core.describeError
 import app.marzha.data.Db
+import app.marzha.data.Profiles
 import app.marzha.data.Store
 import app.marzha.data.Sync
 import app.marzha.data.toCore
@@ -59,10 +60,21 @@ data class Coverage(val loaded: Int, val total: Int, val firstMissing: LocalDate
 data class TypeLine(val name: String, val cls: app.marzha.core.FeeClass, val amount: Double, val count: Int)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
-    private val store = Store(app)
-    private val db = Db.get(app)
-    private val dao = db.dao()
-    private val sync = Sync(db, store)
+    private val profilesStore = Profiles(app)
+
+    // Всё ниже относится к текущему кабинету и подменяется при переключении.
+    private var store = Store(app, profilesStore.current().prefsName)
+    private var db = Db.get(app, profilesStore.current().dbName)
+    private var dao = db.dao()
+    private var sync = Sync(db, store)
+
+    /** Номер «поколения» кабинета: загрузка, начатая в другом кабинете, не трогает экран текущего. */
+    private var generation = 0
+
+    var profiles by mutableStateOf(profilesStore.list())
+        private set
+    var profile by mutableStateOf(profilesStore.current())
+        private set
 
     /** Сколько дней истории грузим при первом подключении. */
     private val initialDays = 35L
@@ -102,12 +114,86 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var hasPerf by mutableStateOf(store.hasPerf)
         private set
-    var theme by mutableStateOf(store.theme)
+    var theme by mutableStateOf(profilesStore.theme)
         private set
 
     fun chooseTheme(name: String) {
-        store.theme = name
+        profilesStore.theme = name
         theme = name
+    }
+
+    /** Переключает приложение на другой кабинет: свои ключи, настройки и данные. */
+    fun switchProfile(id: Int) {
+        if (id == profile.id && profiles.any { it.id == id }) return
+        profilesStore.currentId = id
+        openCurrent()
+    }
+
+    /** Новый кабинет: откроется экран подключения ключа Ozon. */
+    fun addProfile(name: String) {
+        val p = profilesStore.add(name)
+        profilesStore.currentId = p.id
+        openCurrent()
+    }
+
+    fun renameProfile(id: Int, name: String) {
+        profilesStore.rename(id, name)
+        profiles = profilesStore.list()
+        profile = profilesStore.current()
+    }
+
+    /** Удаляет кабинет и всё, что о нём хранится на телефоне. Последний кабинет не удаляется — только очищается. */
+    fun deleteProfile(id: Int) {
+        if (profiles.size <= 1) {
+            logout()
+            return
+        }
+        val wasCurrent = id == profile.id
+        viewModelScope.launch {
+            if (wasCurrent) {
+                generation++
+                recomputeJob?.cancel()
+            }
+            withContext(Dispatchers.IO) { profilesStore.remove(id) }
+            if (wasCurrent) openCurrent() else profiles = profilesStore.list()
+        }
+    }
+
+    /** Подключает объекты текущего кабинета и заново читает всё его состояние. */
+    private fun openCurrent() {
+        generation++
+        recomputeJob?.cancel()
+        val p = profilesStore.current()
+        val app = getApplication<Application>()
+        store = Store(app, p.prefsName)
+        db = Db.get(app, p.dbName)
+        dao = db.dao()
+        sync = Sync(db, store)
+        profiles = profilesStore.list()
+        profile = p
+        connected = store.hasKeys || store.demo
+        demo = store.demo
+        settings = store.settings
+        historyFrom = store.historyFrom
+        lastSync = store.lastSync
+        clientId = store.clientId
+        hasPerf = store.hasPerf
+        syncing = false
+        syncStatus = ""
+        error = null
+        lastResult = null
+        report = null
+        stockReport = null
+        campaignLines = emptyList()
+        costs = emptyMap()
+        expenses = emptyList()
+        loadedDays = emptySet()
+        coverage = null
+        typeLines = emptyList()
+        if (connected) {
+            recompute()
+            if (!demo && System.currentTimeMillis() - store.lastSync > 3 * 3600_000L) sync()
+        }
     }
 
     private var recomputeJob: Job? = null
@@ -155,6 +241,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Пересчитывает отчёты из локальной базы. */
     fun recompute() {
         recomputeJob?.cancel()
+        val gen = generation
+        val dao = dao
+        val store = store
         recomputeJob = viewModelScope.launch {
             val today = today()
             val (from, to) = range()
@@ -193,6 +282,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 Computed(rep, stock, ads, costMap, exp, loaded, cov, types)
             }
+            if (gen != generation) return@launch
             loadedDays = result.loaded
             coverage = result.coverage
             typeLines = result.types
@@ -236,12 +326,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         syncing = true
         error = null
         syncStatus = "Подключаемся к Ozon…"
+        val gen = generation
+        val sync = sync
+        val store = store
         viewModelScope.launch {
             var lastShown = 0L
             try {
                 val result = withContext(Dispatchers.IO) {
                     sync.run(want, today) { msg ->
                         viewModelScope.launch {
+                            // Пока грузился этот кабинет, пользователь мог переключиться на другой.
+                            if (gen != generation) return@launch
                             syncStatus = msg
                             // Показываем цифры по мере загрузки, но не чаще раза в несколько секунд.
                             val now = System.currentTimeMillis()
@@ -252,14 +347,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
+                if (gen != generation) return@launch
                 error = result.warning
                 lastResult = when {
                     result.daysFailed.isEmpty() -> "Готово: загружено дней — ${result.daysLoaded}."
                     else -> "Загружено дней — ${result.daysLoaded}, не загрузилось — ${result.daysFailed.size}."
                 }
             } catch (e: Exception) {
-                error = describeError(e)
+                if (gen == generation) error = describeError(e)
             } finally {
+                if (gen != generation) return@launch
                 syncing = false
                 syncStatus = ""
                 historyFrom = store.historyFrom
@@ -270,7 +367,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Проверяет ключ в Ozon и, если он рабочий, сохраняет и запускает первую загрузку. */
-    fun connect(id: String, key: String, onResult: (String?) -> Unit) {
+    fun connect(id: String, key: String, name: String = "", onResult: (String?) -> Unit) {
         viewModelScope.launch {
             val err = withContext(Dispatchers.IO) {
                 try {
@@ -288,6 +385,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 store.clientId = id
                 store.apiKey = key
                 clientId = store.clientId
+                if (name.isNotBlank()) renameProfile(profile.id, name)
                 connected = true
                 sync()
             }
@@ -336,8 +434,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.lastSync = 0
     }
 
-    /** Выход: стирает ключи и все загруженные данные с устройства. */
+    /** Выход: стирает ключи и все загруженные данные кабинета. Если кабинетов несколько — кабинет удаляется. */
     fun logout() {
+        if (profiles.size > 1) {
+            deleteProfile(profile.id)
+            return
+        }
         viewModelScope.launch {
             recomputeJob?.cancel()
             withContext(Dispatchers.IO) { wipeData() }

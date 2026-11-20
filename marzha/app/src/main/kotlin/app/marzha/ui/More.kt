@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,6 +42,8 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit, openSupport: () -> Unit, o
     var showPerf by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     var explainCsv by remember { mutableStateOf(false) }
+    var addProfile by remember { mutableStateOf(false) }
+    var editProfile by remember { mutableStateOf<app.marzha.data.Profile?>(null) }
     val s = vm.settings
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -54,6 +57,34 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit, openSupport: () -> Unit, o
                     }
                     Text("›", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                 }
+            }
+        }
+
+        // ── Кабинеты ──
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("Кабинеты", Modifier.weight(1f))
+                IconButton(onClick = { addProfile = true }) { Icon(Icons.Filled.Add, contentDescription = "Добавить кабинет") }
+            }
+        }
+        item {
+            Panel {
+                vm.profiles.forEach { p ->
+                    val current = p.id == vm.profile.id
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { vm.switchProfile(p.id) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = current, onClick = { vm.switchProfile(p.id) })
+                        Column(Modifier.weight(1f)) {
+                            Text(p.name, fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal)
+                            Hint(if (current) "открыт сейчас" else "нажмите, чтобы переключиться")
+                        }
+                        TextButton(onClick = { editProfile = p }) { Text("Изменить") }
+                    }
+                }
+                TextButton(onClick = { addProfile = true }) { Text("Добавить кабинет") }
+                Hint("У каждого кабинета свои ключи Ozon, себестоимость, расходы, налог и данные. Переключаться можно и на главной — нажмите на название магазина.")
             }
         }
 
@@ -194,7 +225,14 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit, openSupport: () -> Unit, o
                 TextButton(onClick = openCheck, enabled = vm.report != null) { Text("Проверка данных: начисления Ozon по видам и дням") }
                 TextButton(onClick = { explainCsv = true }, enabled = vm.report != null) { Text("Выгрузить отчёт по товарам (CSV)") }
                 TextButton(onClick = { confirmLogout = true }, enabled = !vm.syncing) {
-                    Text(if (vm.demo) "Выйти из демо" else "Выйти и стереть данные с телефона", color = lossColor)
+                    Text(
+                        when {
+                            vm.profiles.size > 1 -> "Удалить кабинет «${vm.profile.name}» с телефона"
+                            vm.demo -> "Выйти из демо"
+                            else -> "Выйти и стереть данные с телефона"
+                        },
+                        color = lossColor,
+                    )
                 }
             }
         }
@@ -213,6 +251,8 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit, openSupport: () -> Unit, o
         ExpenseDialog(e, today = vm.today().toString(), onDismiss = { editExpense = null }, onSave = { vm.saveExpense(it); editExpense = null }, onDelete = { vm.deleteExpense(e.id); editExpense = null })
     }
     if (showKeys) KeysDialog(vm, onDismiss = { showKeys = false })
+    if (addProfile) AddProfileDialog(vm, onDismiss = { addProfile = false })
+    editProfile?.let { p -> EditProfileDialog(vm, p, onDismiss = { editProfile = null }) }
     if (explainCsv) vm.report?.let { r ->
         AlertDialog(
             onDismissRequest = { explainCsv = false },
@@ -244,7 +284,15 @@ fun MoreScreen(vm: AppViewModel, openAds: () -> Unit, openSupport: () -> Unit, o
     if (confirmLogout) AlertDialog(
         onDismissRequest = { confirmLogout = false },
         title = { Text(if (vm.demo) "Выйти из демо?" else "Стереть данные?") },
-        text = { Text(if (vm.demo) "Демо-данные будут удалены." else "С телефона удалятся ключ Ozon, загруженные данные, себестоимость и расходы. В кабинете Ozon ничего не изменится.") },
+        text = {
+            Text(
+                when {
+                    vm.profiles.size > 1 -> "Кабинет «${vm.profile.name}» удалится с телефона вместе с ключом, данными, себестоимостью и расходами. Остальные кабинеты останутся. В самом Ozon ничего не изменится."
+                    vm.demo -> "Демо-данные будут удалены."
+                    else -> "С телефона удалятся ключ Ozon, загруженные данные, себестоимость и расходы. В кабинете Ozon ничего не изменится."
+                }
+            )
+        },
         confirmButton = { TextButton(onClick = { confirmLogout = false; vm.logout() }) { Text("Выйти", color = lossColor) } },
         dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Отмена") } },
     )
@@ -392,12 +440,17 @@ private fun ExpenseDialog(initial: Expense, today: String, onDismiss: () -> Unit
 
 /** Форма ключа Seller API: и на первом экране, и в настройках. */
 @Composable
-fun KeysForm(vm: AppViewModel, onConnected: () -> Unit, modifier: Modifier = Modifier) {
+fun KeysForm(vm: AppViewModel, onConnected: () -> Unit, modifier: Modifier = Modifier, askName: Boolean = false) {
+    var name by remember { mutableStateOf("") }
     var id by remember { mutableStateOf("") }
     var key by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (askName) OutlinedTextField(
+            name, { name = it.take(40) }, label = { Text("Название магазина") },
+            placeholder = { Text(vm.profile.name) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        )
         OutlinedTextField(id, { id = it.filter(Char::isDigit).take(12) }, label = { Text("Client-Id") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(
             key, { key = it.trim().take(80) }, label = { Text("API-ключ") }, singleLine = true,
@@ -408,7 +461,7 @@ fun KeysForm(vm: AppViewModel, onConnected: () -> Unit, modifier: Modifier = Mod
             onClick = {
                 busy = true
                 err = null
-                vm.connect(id, key) { e ->
+                vm.connect(id, key, name) { e ->
                     busy = false
                     err = e
                     if (e == null) onConnected()
@@ -423,6 +476,51 @@ fun KeysForm(vm: AppViewModel, onConnected: () -> Unit, modifier: Modifier = Mod
         Hint("Где взять: Ozon Seller → Настройки → Seller API → Сгенерировать ключ. Достаточно роли «Admin read only» — приложение только читает данные и ничего не меняет в кабинете.")
         Hint("Ключ хранится только на этом телефоне в зашифрованном виде и отправляется только в Ozon.")
     }
+}
+
+/** Новый кабинет: только название, ключ вводится на следующем экране. */
+@Composable
+fun AddProfileDialog(vm: AppViewModel, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Новый кабинет") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it.take(40) }, label = { Text("Название магазина") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Hint("Дальше откроется экран подключения: для нового кабинета нужен свой ключ Seller API из его личного кабинета Ozon.")
+            }
+        },
+        confirmButton = { Button(onClick = { vm.addProfile(name); onDismiss() }) { Text("Создать") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun EditProfileDialog(vm: AppViewModel, p: app.marzha.data.Profile, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf(p.name) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Кабинет") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it.take(40) }, label = { Text("Название магазина") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                if (vm.profiles.size > 1) {
+                    if (!confirmDelete) TextButton(onClick = { confirmDelete = true }) {
+                        Icon(Icons.Filled.Delete, contentDescription = null, tint = lossColor)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Удалить кабинет", color = lossColor)
+                    } else {
+                        Text("Удалить «${p.name}» с телефона вместе с ключом, данными, себестоимостью и расходами? В Ozon ничего не изменится.", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { vm.deleteProfile(p.id); onDismiss() }) { Text("Да, удалить", color = lossColor) }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { vm.renameProfile(p.id, name); onDismiss() }, enabled = name.isNotBlank()) { Text("Сохранить") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }
 
 @Composable

@@ -137,12 +137,23 @@ private fun Onboarding(vm: AppViewModel) {
             }
         }
         Column(Modifier.padding(24.dp)) {
-            Text("Подключите кабинет", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (vm.profiles.size > 1) "Подключите кабинет «${vm.profile.name}»" else "Подключите кабинет",
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+            )
             Spacer(Modifier.height(12.dp))
-            KeysForm(vm, onConnected = {})
+            KeysForm(vm, onConnected = {}, askName = true)
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { vm.startDemo() }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Text("Посмотреть на демо-данных")
+            }
+            // Добавили кабинет, но передумали — вернуться к уже подключённому.
+            val others = vm.profiles.filter { it.id != vm.profile.id }
+            if (others.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { vm.deleteProfile(vm.profile.id) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Отмена — вернуться в «${others.first().name}»")
+                }
             }
         }
     }
