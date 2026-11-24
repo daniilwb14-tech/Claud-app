@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Main(vm: AppViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    // Экран поверх вкладок: 0 — нет, −1 — реклама, −2 — выплаты, −3 — поддержка, −4 — проверка данных, иначе SKU товара.
+    // Экран поверх вкладок: 0 — нет, −1 — реклама, −2 — выплаты, −3 — поддержка, −4 — проверка данных, −5 — кластеры, иначе SKU товара.
     var overlay by rememberSaveable { mutableLongStateOf(0L) }
     // Откуда открыли товар: чтобы «назад» из карточки возвращал в рекламу, а не на вкладку.
     var under by rememberSaveable { mutableLongStateOf(0L) }
@@ -91,6 +91,7 @@ private fun Main(vm: AppViewModel) {
                 overlay == -2L -> PayoutScreen(vm, back = { closeOverlay() }, openCheck = { overlay = -4L })
                 overlay == -3L -> SupportScreen(vm, back = { closeOverlay() })
                 overlay == -4L -> DataCheckScreen(vm, back = { closeOverlay() })
+                overlay == -5L -> ClustersScreen(vm, back = { closeOverlay() }, openProduct = { under = -5L; overlay = it })
                 overlay != 0L -> ProductDetailScreen(vm, overlay, back = { closeOverlay() })
                 tab == 0 -> DashboardScreen(
                     vm,
@@ -101,7 +102,7 @@ private fun Main(vm: AppViewModel) {
                     openSettings = { tab = 3 },
                 )
                 tab == 1 -> ProductsScreen(vm, productSort, { productSort = it }, openProduct = { overlay = it })
-                tab == 2 -> StocksScreen(vm, openProduct = { overlay = it })
+                tab == 2 -> StocksScreen(vm, openProduct = { overlay = it }, openClusters = { overlay = -5L })
                 else -> MoreScreen(vm, openAds = { overlay = -1L }, openSupport = { overlay = -3L }, openCheck = { overlay = -4L })
             }
         }

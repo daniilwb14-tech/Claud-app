@@ -50,10 +50,18 @@ class Sync(private val db: Db, private val store: Store) {
 
         progress("Остатки…")
         try {
-            val (stocks, offers) = api.stocks()
+            val res = api.stocks()
+            val (stocks, offers) = res.stocks to res.offers
+            // Строки по складам одного кластера сводим заранее: ключ таблицы — товар и кластер.
+            val clusters = res.clusters.groupBy { it.sku to it.clusterId }.map { (_, l) -> l.reduce { a, b -> a + b } }
             db.withTransaction {
                 dao.deleteStocks()
                 dao.putStocks(stocks.map { it.toE() })
+                // Аналитика может не ответить — тогда оставляем прошлую разбивку, а не стираем её.
+                if (clusters.isNotEmpty()) {
+                    dao.deleteClusterStocks()
+                    dao.putClusterStocks(clusters.map { it.toE() })
+                }
             }
             // Товары, которых нет в списке карточек (например, архивные), но есть на остатках.
             dao.addProducts(offers.map { (sku, offer) -> Product(sku, offer, offer).toE() })

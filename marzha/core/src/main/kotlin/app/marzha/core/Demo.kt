@@ -13,6 +13,7 @@ class DemoData(
     val stocks: List<Stock>,
     val expenses: List<Expense>,
     val ads: List<AdDay>,
+    val clusters: List<ClusterStock> = emptyList(),
 )
 
 fun demoData(today: LocalDate, days: Int = 62): DemoData {
@@ -93,5 +94,26 @@ fun demoData(today: LocalDate, days: Int = 62): DemoData {
         Expense(1, "Ведение кабинета", 20000.0, ExpenseKind.MONTHLY),
         Expense(2, "Фулфилмент и упаковщик", 9000.0, ExpenseKind.WEEKLY),
     )
-    return DemoData(products, costs, fin, orders, stocks, expenses, ads)
+    // Остатки по кластерам: спрос делится по долям кластеров, а товар лежит неравномерно —
+    // где-то с запасом, где-то почти закончился. Так видно, куда везти в первую очередь.
+    val clusterNames = listOf(
+        "Москва, МО и Дальние регионы" to 0.34, "Санкт-Петербург и СЗО" to 0.13, "Казань" to 0.09,
+        "Екатеринбург" to 0.09, "Краснодар" to 0.08, "Ростов" to 0.07, "Самара" to 0.07, "Новосибирск" to 0.07,
+        "Воронеж" to 0.06,
+    )
+    val clusters = ArrayList<ClusterStock>()
+    for ((i, item) in items.withIndex()) {
+        val sku = products[i].sku
+        val total = stocks[i].fbo
+        for ((c, pair) in clusterNames.withIndex()) {
+            val (name, share) = pair
+            val perDay = item.perDay * 0.75 * share
+            // Перекос остатков: первые кластеры полны, дальние пустеют.
+            val skew = when ((c + i) % 5) { 0 -> 0.0; 1 -> 0.35; 2 -> 0.8; 3 -> 1.4; else -> 2.2 }
+            val avail = (total * share * skew).roundToInt()
+            val transit = if ((c + i) % 4 == 0) (perDay * 5).roundToInt() else 0
+            clusters += ClusterStock(sku, 100L + c, name, avail, transit, (perDay * 0.3).roundToInt(), perDay)
+        }
+    }
+    return DemoData(products, costs, fin, orders, stocks, expenses, ads, clusters)
 }

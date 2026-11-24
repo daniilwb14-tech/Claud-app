@@ -14,6 +14,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import app.marzha.core.AdDay
+import app.marzha.core.ClusterStock
 import app.marzha.core.Expense
 import app.marzha.core.ExpenseKind
 import app.marzha.core.FinDay
@@ -65,6 +66,16 @@ data class LoadedDayE(@PrimaryKey val date: String, val at: Long)
 @Entity(tableName = "acc_type", primaryKeys = ["date", "name"])
 data class AccTypeE(val date: String, val name: String, val cls: String, val amount: Double, val count: Int)
 
+/** Остаток и спрос товара в кластере Ozon. */
+@Entity(tableName = "cluster_stock", primaryKeys = ["sku", "clusterId"])
+data class ClusterStockE(
+    val sku: Long, val clusterId: Long, val cluster: String, val available: Int, val transit: Int,
+    val returning: Int, val perDay: Double,
+)
+
+fun ClusterStockE.toCore() = ClusterStock(sku, clusterId, cluster, available, transit, returning, perDay)
+fun ClusterStock.toE() = ClusterStockE(sku, clusterId, cluster, available, transit, returning, perDay)
+
 fun ProductE.toCore() = Product(sku, offerId, name, image)
 fun Product.toE() = ProductE(sku, offerId, name, image)
 fun CostE.toCore() = UnitCost(purchase, marking, packaging, other, UnitCost.parseExtras(extras))
@@ -106,6 +117,10 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putExpenses(rows: List<ExpenseE>)
     @Query("DELETE FROM expense WHERE id = :id") suspend fun deleteExpense(id: Long)
 
+    @Query("SELECT * FROM cluster_stock") suspend fun clusterStocks(): List<ClusterStockE>
+    @Query("DELETE FROM cluster_stock") suspend fun deleteClusterStocks()
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putClusterStocks(rows: List<ClusterStockE>)
+
     @Query("SELECT date FROM loaded_day") suspend fun loadedDays(): List<String>
     @Query("DELETE FROM loaded_day") suspend fun clearLoadedDays()
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putLoadedDay(row: LoadedDayE)
@@ -120,8 +135,8 @@ interface AppDao {
 }
 
 @Database(
-    entities = [ProductE::class, CostE::class, FinE::class, OrderE::class, StockE::class, ExpenseE::class, AdE::class, LoadedDayE::class, AccTypeE::class],
-    version = 4,
+    entities = [ProductE::class, CostE::class, FinE::class, OrderE::class, StockE::class, ExpenseE::class, AdE::class, LoadedDayE::class, AccTypeE::class, ClusterStockE::class],
+    version = 5,
     exportSchema = false,
 )
 abstract class Db : RoomDatabase() {
@@ -153,13 +168,24 @@ abstract class Db : RoomDatabase() {
             }
         }
 
+        /** Версия 5: остатки и спрос по кластерам. */
+        private val migration4to5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `cluster_stock` (`sku` INTEGER NOT NULL, `clusterId` INTEGER NOT NULL, " +
+                        "`cluster` TEXT NOT NULL, `available` INTEGER NOT NULL, `transit` INTEGER NOT NULL, " +
+                        "`returning` INTEGER NOT NULL, `perDay` REAL NOT NULL, PRIMARY KEY(`sku`, `clusterId`))"
+                )
+            }
+        }
+
         private val instances = HashMap<String, Db>()
 
         /** База кабинета: у каждого кабинета свой файл. */
         fun get(context: Context, name: String = "marzha.db"): Db = synchronized(this) {
             instances.getOrPut(name) {
                 Room.databaseBuilder(context.applicationContext, Db::class.java, name)
-                    .addMigrations(migration1to2, migration2to3, migration3to4)
+                    .addMigrations(migration1to2, migration2to3, migration3to4, migration4to5)
                     .fallbackToDestructiveMigration()
                     .build()
             }

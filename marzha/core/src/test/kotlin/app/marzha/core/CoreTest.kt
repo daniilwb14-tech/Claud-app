@@ -286,6 +286,8 @@ class CoreTest {
         near(r.daily.sumOf { it.profit }, r.total.b.profit, 1.0)
         assertEquals(1, r.missingCost)
         assertTrue(campaigns(d.ads, today.minusDays(7), today.minusDays(1)).size == 4)
+        val plan = buildClusterPlan(d.clusters, r, d.products.associateBy { it.sku }, EconSettings())
+        assertTrue(plan.urgent.isNotEmpty() && plan.clusters.size == 9)
     }
 
     @Test
@@ -302,6 +304,44 @@ class CoreTest {
         val month = groupPoints(r.daily, Grouping.MONTH).single()
         near(month.revenue, 2000.0)
         near(month.payout, 2000.0)
+    }
+
+    @Test
+    fun clusterPlan() {
+        val text = """{"items":[
+          {"sku":1,"cluster_id":10,"cluster_name":"Москва","warehouse_name":"Хоругвино","available_stock_count":30,"transit_stock_count":0,"ads_cluster":10},
+          {"sku":1,"cluster_id":10,"cluster_name":"Москва","warehouse_name":"Пушкино","available_stock_count":10,"transit_stock_count":20,"ads_cluster":10},
+          {"sku":1,"cluster_id":20,"cluster_name":"Казань","available_stock_count":0,"ads_cluster":3},
+          {"sku":1,"cluster_id":30,"cluster_name":"Новосибирск","available_stock_count":50,"ads_cluster":0},
+          {"sku":2,"cluster_id":20,"cluster_name":"Казань","available_stock_count":100,"ads_cluster":2}]}"""
+        val rows = parseClusterStocks(text)
+        assertEquals(5, rows.size)
+        val from = LocalDate.of(2026, 11, 1)
+        val rep = buildReport(from, from.plusDays(29), listOf(FinDay("2026-11-02", 1, soldQty = 30, sales = 30000.0)),
+            emptyList(), emptyMap(), emptyMap(), emptyList(), EconSettings(taxPct = 0.0))
+        val plan = buildClusterPlan(rows, rep, emptyMap(), EconSettings(stockTargetDays = 30))
+
+        val msk = plan.lines.first { it.sku == 1L && it.stock.clusterId == 10L }
+        // Два склада Москвы сложились, спрос кластера не удвоился.
+        assertEquals(40, msk.stock.available)
+        assertEquals(20, msk.stock.transit)
+        near(msk.stock.perDay, 10.0)
+        near(msk.daysLeft!!, 4.0)
+        assertEquals(ClusterUrgency.CRITICAL, msk.urgency)
+        assertEquals(10 * 30 - 40 - 20, msk.toShip)
+        near(msk.revenuePerDay, 10 * 1000.0)
+
+        val kzn = plan.lines.first { it.sku == 1L && it.stock.clusterId == 20L }
+        assertEquals(ClusterUrgency.OUT, kzn.urgency)
+        assertEquals(90, kzn.toShip)
+
+        val nsk = plan.lines.first { it.stock.clusterId == 30L }
+        assertEquals(ClusterUrgency.EXCESS, nsk.urgency)
+        assertEquals(0, nsk.toShip)
+
+        // Сначала то, что закончилось, затем самое срочное.
+        assertEquals(listOf(20L, 10L), plan.urgent.map { it.stock.clusterId })
+        assertEquals(ClusterUrgency.OUT, plan.clusters.first().worst)
     }
 
     @Test

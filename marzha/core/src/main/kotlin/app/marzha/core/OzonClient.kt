@@ -69,6 +69,9 @@ fun describeError(e: Throwable): String = when {
     else -> e.message ?: e.toString()
 }
 
+/** Остатки: по товарам, артикулы и разбивка по кластерам (пустая, если аналитика недоступна). */
+class StocksResult(val stocks: List<Stock>, val offers: Map<Long, String>, val clusters: List<ClusterStock>)
+
 /** Клиент Ozon Seller API: только чтение. */
 class OzonClient(
     private val clientId: String,
@@ -112,7 +115,7 @@ class OzonClient(
     }
 
     /** Остатки: FBO и FBS из карточек, плюс «в пути» и «возвращается» из аналитики остатков. */
-    fun stocks(): Pair<List<Stock>, Map<Long, String>> {
+    fun stocks(): StocksResult {
         val bySku = LinkedHashMap<Long, Stock>()
         val offers = HashMap<Long, String>()
         var cursor = ""
@@ -128,11 +131,14 @@ class OzonClient(
             cursor = p.cursor
         }
         // Аналитика точнее по FBO и знает про поставки в пути; если недоступна — остаёмся на данных карточек.
+        val clusters = ArrayList<ClusterStock>()
         try {
             for (chunk in bySku.keys.toList().chunked(100)) {
-                val a = parseAnalyticsStocks(post("/v1/analytics/stocks", buildJsonObject {
+                val text = post("/v1/analytics/stocks", buildJsonObject {
                     putJsonArray("skus") { chunk.forEach { add(JsonPrimitive(it.toString())) } }
-                }))
+                })
+                clusters += parseClusterStocks(text)
+                val a = parseAnalyticsStocks(text)
                 for ((sku, s) in a) {
                     val old = bySku[sku] ?: Stock(sku)
                     bySku[sku] = old.copy(fbo = s.fbo, inTransit = s.inTransit, returning = s.returning)
@@ -141,7 +147,7 @@ class OzonClient(
         } catch (e: ApiException) {
             if (e.code == 401 || e.code == 403) throw e
         }
-        return bySku.values.toList() to offers
+        return StocksResult(bySku.values.toList(), offers, clusters)
     }
 
     /** Справочник видов начислений. */

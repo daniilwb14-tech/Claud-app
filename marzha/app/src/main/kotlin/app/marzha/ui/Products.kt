@@ -219,6 +219,8 @@ fun ProductDetailScreen(vm: AppViewModel, sku: Long, back: () -> Unit) {
                 Panel { Hint("За выбранный период по товару нет начислений.") }
             }
 
+            ProductClusters(vm, sku)
+
             if (stock != null) Panel {
                 Text("Остатки", fontWeight = FontWeight.SemiBold)
                 Line("На складах Ozon", "${qty(stock.stock.fbo)} шт")

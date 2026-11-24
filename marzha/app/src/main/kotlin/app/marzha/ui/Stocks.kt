@@ -52,7 +52,7 @@ private fun urgencyColor(u: Urgency): Color = when (u) {
 }
 
 @Composable
-fun StocksScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
+fun StocksScreen(vm: AppViewModel, openProduct: (Long) -> Unit, openClusters: () -> Unit) {
     var sort by rememberSaveable { mutableStateOf(StockSort.ALL) }
     val rep = vm.stockReport
     val listState = rememberLazyListState()
@@ -99,6 +99,7 @@ fun StocksScreen(vm: AppViewModel, openProduct: (Long) -> Unit) {
                 }
             }
         }
+        item { UrgentClustersCard(vm, openClusters, openProduct) }
         item {
             Hint(
                 "Выручка, если продать всё по средним ценам за 30 дней (с баллами Ozon): ${rubShort(rep.expectedRevenue)}. " +

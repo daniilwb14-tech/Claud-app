@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import app.marzha.core.CampaignLine
+import app.marzha.core.ClusterPlan
+import app.marzha.core.buildClusterPlan
 import app.marzha.core.EconSettings
 import app.marzha.core.Expense
 import app.marzha.core.MOSCOW
@@ -190,6 +192,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         loadedDays = emptySet()
         coverage = null
         typeLines = emptyList()
+        clusterPlan = null
         if (connected) {
             recompute()
             if (!demo && System.currentTimeMillis() - store.lastSync > 3 * 3600_000L) sync()
@@ -210,6 +213,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var coverage by mutableStateOf<Coverage?>(null)
         private set
     var typeLines by mutableStateOf<List<TypeLine>>(emptyList())
+        private set
+
+    /** План поставок по кластерам; null — Ozon не отдал разбивку. */
+    var clusterPlan by mutableStateOf<ClusterPlan?>(null)
         private set
 
     /** Границы выбранного периода. */
@@ -264,6 +271,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val recentLoaded = if (demo) null else countDays(recentFrom, recentTo) { it in loaded }
                 val stock = buildStockReport(dao.stocks().map { it.toCore() }, recent, products, costMap, s, recentLoaded?.coerceAtLeast(1))
                 val ads = campaigns(dao.ads(from.toString(), to.toString()).map { it.toCore() }, from, to)
+                val clusterRows = dao.clusterStocks().map { it.toCore() }
+                val plan = if (clusterRows.isEmpty()) null else buildClusterPlan(clusterRows, recent, products, s)
                 val types = dao.accTypes(from.toString(), to.toString())
                     .groupBy { it.name }
                     .map { (name, rows) ->
@@ -280,12 +289,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val n = countDays(from, last) { d -> (d in loaded).also { ok -> if (!ok && first == null) first = LocalDate.parse(d) } }
                     Coverage(n, countDays(from, last) { true }, first)
                 }
-                Computed(rep, stock, ads, costMap, exp, loaded, cov, types)
+                Computed(rep, stock, ads, costMap, exp, loaded, cov, types, plan)
             }
             if (gen != generation) return@launch
             loadedDays = result.loaded
             coverage = result.coverage
             typeLines = result.types
+            clusterPlan = result.plan
             report = result.report
             stockReport = result.stock
             campaignLines = result.ads
@@ -298,6 +308,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val report: Report, val stock: StockReport, val ads: List<CampaignLine>,
         val costs: Map<Long, UnitCost>, val expenses: List<Expense>,
         val loaded: Set<String>, val coverage: Coverage?, val types: List<TypeLine>,
+        val plan: ClusterPlan?,
     )
 
     private fun countDays(from: LocalDate, to: LocalDate, ok: (String) -> Boolean): Int {
@@ -415,6 +426,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     dao.putStocks(d.stocks.map { it.toE() })
                     dao.putExpenses(d.expenses.map { it.toE() })
                     dao.putAds(d.ads.map { it.toE() })
+                    dao.putClusterStocks(d.clusters.map { it.toE() })
                 }
             }
             store.demo = true
@@ -451,6 +463,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             campaignLines = emptyList()
             costs = emptyMap()
             expenses = emptyList()
+            clusterPlan = null
             settings = store.settings
             historyFrom = null
             lastResult = null

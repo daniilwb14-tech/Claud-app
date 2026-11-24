@@ -427,6 +427,23 @@ fun parseAnalyticsStocks(text: String): Map<Long, Stock> {
     return map
 }
 
+/** Остатки и спрос по кластерам из той же аналитики остатков: строка на товар и склад. */
+fun parseClusterStocks(text: String): List<ClusterStock> =
+    parseJson(text).arr("items").mapNotNull { i ->
+        val sku = i.long("sku")
+        if (sku == 0L) return@mapNotNull null
+        val id = i.long("cluster_id").takeIf { it != 0L } ?: i.long("macrolocal_cluster_id")
+        ClusterStock(
+            sku = sku,
+            clusterId = id,
+            cluster = i.str("cluster_name").ifEmpty { i.str("warehouse_name").ifEmpty { "Кластер $id" } },
+            available = i.int("available_stock_count") + i.int("other_stock_count"),
+            transit = i.int("transit_stock_count") + i.int("requested_stock_count"),
+            returning = i.int("return_from_customer_stock_count"),
+            perDay = i.num("ads_cluster"),
+        )
+    }
+
 // ───────────────────────── Реклама (Performance API) ─────────────────────────
 
 /** Ответ /api/client/statistics/daily/json. */
