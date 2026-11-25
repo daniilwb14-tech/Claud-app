@@ -345,6 +345,67 @@ class CoreTest {
     }
 
     @Test
+    fun unitCalculator() {
+        val i = CalcInput(
+            price = 1000.0, purchase = 200.0, marking = 5.0, packaging = 15.0, inbound = 30.0,
+            commission = 0.30, logistics = 100.0, returnLogistics = 50.0, buyout = 0.8, drr = 0.08,
+            acquiring = 0.01, storage = 5.0, taxPct = 0.06, manager = 0.01, ordersPerDay = 10.0, stockDays = 30,
+        )
+        val r = calcUnit(i)
+        near(r.commission, -300.0)
+        // Невыкуп: на 1 выкупленную приходится 0,25 невыкупленной, каждая стоит 100 + 50.
+        near(r.nonBuyout, -37.5)
+        // Реклама со всех заказов: 8% × 1000 ÷ 0,8.
+        near(r.ads, -100.0)
+        near(r.cogs, -250.0)
+        val expected = 1000 - 300 - 100 - 37.5 - 100 - 10 - 5 - 60 - 10 - 250
+        near(r.profit, expected)
+        near(r.margin, expected / 1000, 1e-9)
+        // В точке безубыточности прибыль ноль.
+        near(calcUnit(i.copy(price = r.breakEvenPrice!!)).profit, 0.0, 0.01)
+        near(calcUnit(i.copy(drr = r.maxDrr)).profit, 0.0, 0.01)
+        near(r.soldPerMonth, 240.0)
+        assertEquals(240, r.firstBatchUnits)
+        assertEquals(Verdict.OK, r.verdict)
+        assertEquals(Verdict.LOSS, calcUnit(i.copy(price = 500.0)).verdict)
+        // Налог с оплаты клиента: база меньше на долю баллов.
+        near(calcUnit(i.copy(taxBase = TaxBase.CUSTOMER_PAID, ozonPoints = 0.5)).tax, -30.0)
+    }
+
+    @Test
+    fun calcDefaultsFromSales() {
+        val l = SkuReport(
+            sku = 1, product = Product(1), soldQty = 100, returnQty = 0, orderedQty = 130, orderedSum = 130000.0,
+            cancelledQty = 20, deliveredQty = 100, customerPaid = 40000.0,
+            b = Breakdown(revenue = 100000.0, commission = -30000.0, logistics = -9000.0, returnLogistics = -1000.0, ads = -6500.0, acquiring = -800.0),
+        )
+        val c = calcFromSales(l, UnitCost(100.0, 5.0), EconSettings(taxPct = 6.0))
+        near(c.price, 1000.0)
+        near(c.commission, 0.3, 1e-9)
+        near(c.logistics, 90.0)
+        near(c.returnLogistics, 50.0)
+        near(c.buyout, 100.0 / 120.0, 1e-9)
+        near(c.drr, 0.05, 1e-9)
+        near(c.ozonPoints, 0.6, 1e-9)
+        near(c.purchase, 100.0)
+        near(c.taxPct, 0.06, 1e-9)
+    }
+
+    @Test
+    fun categoriesParsing() {
+        val (list, next) = parseCategories(
+            """{"has_next":true,"items":[{"id":"17","label":"Перчатки","metric_gmv":1.5E8,"metric_gmv_growth":12.5,
+               "metric_aiv":1320,"metric_buyout":0.78,"metric_sellers":412,"metric_leader_share":34}]}"""
+        )
+        assertTrue(next)
+        val c = list.single()
+        near(c.avgPrice, 1320.0)
+        near(c.buyout, 0.78, 1e-9)
+        near(c.gmvGrowth, 0.125, 1e-9)
+        near(c.leaderShare, 0.34, 1e-9)
+    }
+
+    @Test
     fun helpers() {
         assertEquals(3, dayChunks(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 7), 3).size)
         near(expensesFor(listOf(Expense(1, "x", 700.0, ExpenseKind.WEEKLY)), LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 14)), 1400.0)

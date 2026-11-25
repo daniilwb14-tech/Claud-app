@@ -150,6 +150,29 @@ class OzonClient(
         return StocksResult(bySku.values.toList(), offers, clusters)
     }
 
+    /**
+     * Категории рынка из «Аналитика → Что продавать → Категории» за последний месяц, по сумме заказов.
+     * Ozon отдаёт это только продавцам с подпиской Premium Pro.
+     */
+    fun categories(maxItems: Int = 600): List<CategoryStat> {
+        val out = ArrayList<CategoryStat>()
+        var offset = 0
+        while (out.size < maxItems) {
+            val (page, hasNext) = parseCategories(post("/v1/analytics/category/comparison", buildJsonObject {
+                put("period", "MONTH")
+                put("sort", "DESC")
+                put("metric", "GMV")
+                put("group", "CATEGORY_3")
+                put("limit", 100)
+                put("offset", offset)
+            }))
+            out += page
+            if (!hasNext || page.isEmpty()) break
+            offset += page.size
+        }
+        return out
+    }
+
     /** Справочник видов начислений. */
     fun feeTypes(): FeeTypes = FeeTypes.parse(post("/v1/finance/accrual/types", buildJsonObject { }))
 

@@ -88,7 +88,9 @@ private fun UrgentRow(l: ClusterLine, onClick: () -> Unit) {
         Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(color))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text("${productTitle(l.product)} → ${l.stock.cluster}", fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(productTitle(l.product), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Кластер — отдельной строкой, чтобы длинное название товара его не обрезало.
+            Text("в кластер: ${l.stock.cluster}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = color, maxLines = 2)
             Hint(
                 if (l.urgency == ClusterUrgency.OUT) "закончился · продавалось ${num(l.stock.perDay)} шт/день"
                 else "хватит на ${num(l.daysLeft ?: 0.0)} дн. · ${num(l.stock.perDay)} шт/день"

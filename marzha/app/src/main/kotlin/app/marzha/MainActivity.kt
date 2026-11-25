@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -72,6 +73,7 @@ private fun Main(vm: AppViewModel) {
                     "Сводка" to Icons.Filled.Home,
                     "Товары" to Icons.AutoMirrored.Filled.List,
                     "Остатки" to Icons.Filled.ShoppingCart,
+                    "Проверка" to Icons.Filled.Build,
                     "Настройки" to Icons.Filled.Settings,
                 )
                 tabs.forEachIndexed { i, (title, icon) ->
@@ -99,10 +101,11 @@ private fun Main(vm: AppViewModel) {
                     openProducts = { productSort = it; tab = 1 },
                     openAds = { overlay = -1L },
                     openPayout = { overlay = -2L },
-                    openSettings = { tab = 3 },
+                    openSettings = { tab = 4 },
                 )
                 tab == 1 -> ProductsScreen(vm, productSort, { productSort = it }, openProduct = { overlay = it })
                 tab == 2 -> StocksScreen(vm, openProduct = { overlay = it }, openClusters = { overlay = -5L })
+                tab == 3 -> CalcScreen(vm)
                 else -> MoreScreen(vm, openAds = { overlay = -1L }, openSupport = { overlay = -3L }, openCheck = { overlay = -4L })
             }
         }

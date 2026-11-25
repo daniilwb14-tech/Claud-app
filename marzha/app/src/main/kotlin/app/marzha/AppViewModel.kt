@@ -193,6 +193,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         coverage = null
         typeLines = emptyList()
         clusterPlan = null
+        recentReport = null
+        categories = emptyList()
+        categoriesError = null
+        calcCategory = null
         if (connected) {
             recompute()
             if (!demo && System.currentTimeMillis() - store.lastSync > 3 * 3600_000L) sync()
@@ -214,6 +218,59 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var typeLines by mutableStateOf<List<TypeLine>>(emptyList())
         private set
+
+    /** Отчёт за последние 30 дней — источник средних для калькулятора. */
+    var recentReport by mutableStateOf<Report?>(null)
+        private set
+
+    /** Поля калькулятора нового товара: текст как введён, чтобы не мешать набирать «12,». */
+    val calcFields = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+    /** Выбранная категория рынка и список категорий из аналитики Ozon. */
+    var calcCategory by mutableStateOf<app.marzha.core.CategoryStat?>(null)
+    var categories by mutableStateOf<List<app.marzha.core.CategoryStat>>(emptyList())
+        private set
+    var categoriesLoading by mutableStateOf(false)
+        private set
+    var categoriesError by mutableStateOf<String?>(null)
+        private set
+
+    /** Загружает категории рынка. Нужна подписка Premium Pro — без неё Ozon ответит отказом. */
+    fun loadCategories() {
+        if (categoriesLoading) return
+        if (demo) {
+            categories = demoCategories
+            categoriesError = null
+            return
+        }
+        categoriesLoading = true
+        categoriesError = null
+        val gen = generation
+        val store = store
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { app.marzha.core.OzonClient(store.clientId, store.apiKey).categories() }
+            }
+            if (gen != generation) return@launch
+            categoriesLoading = false
+            result.onSuccess {
+                categories = it
+                if (it.isEmpty()) categoriesError = "Ozon не вернул ни одной категории."
+            }.onFailure { e ->
+                categoriesError = if (e is app.marzha.core.ApiException && (e.code == 403 || e.code == 401 || e.code == 400))
+                    "Аналитика категорий доступна только с подпиской Ozon Premium Pro. Без неё калькулятор работает — введите среднюю цену и выкуп вручную."
+                else describeError(e)
+            }
+        }
+    }
+
+    private val demoCategories = listOf(
+        app.marzha.core.CategoryStat("1", "Перчатки и варежки женские", 412_000_000.0, 0.18, 310_000.0, 1290.0, 0.76, 1840.0, 0.21),
+        app.marzha.core.CategoryStat("2", "Носки женские", 655_000_000.0, 0.07, 720_000.0, 910.0, 0.84, 3120.0, 0.17),
+        app.marzha.core.CategoryStat("3", "Шапки женские", 298_000_000.0, 0.24, 160_000.0, 1860.0, 0.71, 2210.0, 0.26),
+        app.marzha.core.CategoryStat("4", "Шарфы и снуды", 121_000_000.0, -0.04, 58_000.0, 2080.0, 0.69, 1430.0, 0.31),
+        app.marzha.core.CategoryStat("5", "Варежки детские", 64_000_000.0, 0.31, 61_000.0, 1040.0, 0.81, 690.0, 0.38),
+    )
 
     /** План поставок по кластерам; null — Ozon не отдал разбивку. */
     var clusterPlan by mutableStateOf<ClusterPlan?>(null)
@@ -289,13 +346,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val n = countDays(from, last) { d -> (d in loaded).also { ok -> if (!ok && first == null) first = LocalDate.parse(d) } }
                     Coverage(n, countDays(from, last) { true }, first)
                 }
-                Computed(rep, stock, ads, costMap, exp, loaded, cov, types, plan)
+                Computed(rep, stock, ads, costMap, exp, loaded, cov, types, plan, recent)
             }
             if (gen != generation) return@launch
             loadedDays = result.loaded
             coverage = result.coverage
             typeLines = result.types
             clusterPlan = result.plan
+            recentReport = result.recent
             report = result.report
             stockReport = result.stock
             campaignLines = result.ads
@@ -308,7 +366,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val report: Report, val stock: StockReport, val ads: List<CampaignLine>,
         val costs: Map<Long, UnitCost>, val expenses: List<Expense>,
         val loaded: Set<String>, val coverage: Coverage?, val types: List<TypeLine>,
-        val plan: ClusterPlan?,
+        val plan: ClusterPlan?, val recent: Report,
     )
 
     private fun countDays(from: LocalDate, to: LocalDate, ok: (String) -> Boolean): Int {
