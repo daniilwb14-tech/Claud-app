@@ -7,10 +7,14 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
+import app.marzha.core.ApiException
 import app.marzha.core.CampaignLine
+import app.marzha.core.CategoryStat
+import app.marzha.core.OzonClient
 import app.marzha.core.ClusterPlan
 import app.marzha.core.buildClusterPlan
 import app.marzha.core.EconSettings
+import app.marzha.core.FeeClass
 import app.marzha.core.Expense
 import app.marzha.core.MOSCOW
 import app.marzha.core.Product
@@ -59,7 +63,7 @@ data class Coverage(val loaded: Int, val total: Int, val firstMissing: LocalDate
 }
 
 /** Начисления Ozon за период по видам — для экрана проверки. */
-data class TypeLine(val name: String, val cls: app.marzha.core.FeeClass, val amount: Double, val count: Int)
+data class TypeLine(val name: String, val cls: FeeClass, val amount: Double, val count: Int)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val profilesStore = Profiles(app)
@@ -227,8 +231,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val calcFields = androidx.compose.runtime.mutableStateMapOf<String, String>()
 
     /** Выбранная категория рынка и список категорий из аналитики Ozon. */
-    var calcCategory by mutableStateOf<app.marzha.core.CategoryStat?>(null)
-    var categories by mutableStateOf<List<app.marzha.core.CategoryStat>>(emptyList())
+    var calcCategory by mutableStateOf<CategoryStat?>(null)
+    var categories by mutableStateOf<List<CategoryStat>>(emptyList())
         private set
     var categoriesLoading by mutableStateOf(false)
         private set
@@ -249,7 +253,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val store = store
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { app.marzha.core.OzonClient(store.clientId, store.apiKey).categories() }
+                runCatching { OzonClient(store.clientId, store.apiKey).categories() }
             }
             if (gen != generation) return@launch
             categoriesLoading = false
@@ -257,7 +261,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 categories = it
                 if (it.isEmpty()) categoriesError = "Ozon не вернул ни одной категории."
             }.onFailure { e ->
-                categoriesError = if (e is app.marzha.core.ApiException && (e.code == 403 || e.code == 401 || e.code == 400))
+                categoriesError = if (e is ApiException && (e.code == 403 || e.code == 401 || e.code == 400))
                     "Аналитика категорий доступна только с подпиской Ozon Premium Pro. Без неё калькулятор работает — введите среднюю цену и выкуп вручную."
                 else describeError(e)
             }
@@ -265,11 +269,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val demoCategories = listOf(
-        app.marzha.core.CategoryStat("1", "Перчатки и варежки женские", 412_000_000.0, 0.18, 310_000.0, 1290.0, 0.76, 1840.0, 0.21),
-        app.marzha.core.CategoryStat("2", "Носки женские", 655_000_000.0, 0.07, 720_000.0, 910.0, 0.84, 3120.0, 0.17),
-        app.marzha.core.CategoryStat("3", "Шапки женские", 298_000_000.0, 0.24, 160_000.0, 1860.0, 0.71, 2210.0, 0.26),
-        app.marzha.core.CategoryStat("4", "Шарфы и снуды", 121_000_000.0, -0.04, 58_000.0, 2080.0, 0.69, 1430.0, 0.31),
-        app.marzha.core.CategoryStat("5", "Варежки детские", 64_000_000.0, 0.31, 61_000.0, 1040.0, 0.81, 690.0, 0.38),
+        CategoryStat("1", "Перчатки и варежки женские", 412_000_000.0, 0.18, 310_000.0, 1290.0, 0.76, 1840.0, 0.21),
+        CategoryStat("2", "Носки женские", 655_000_000.0, 0.07, 720_000.0, 910.0, 0.84, 3120.0, 0.17),
+        CategoryStat("3", "Шапки женские", 298_000_000.0, 0.24, 160_000.0, 1860.0, 0.71, 2210.0, 0.26),
+        CategoryStat("4", "Шарфы и снуды", 121_000_000.0, -0.04, 58_000.0, 2080.0, 0.69, 1430.0, 0.31),
+        CategoryStat("5", "Варежки детские", 64_000_000.0, 0.31, 61_000.0, 1040.0, 0.81, 690.0, 0.38),
     )
 
     /** План поставок по кластерам; null — Ozon не отдал разбивку. */
@@ -334,7 +338,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     .groupBy { it.name }
                     .map { (name, rows) ->
                         TypeLine(
-                            name, runCatching { app.marzha.core.FeeClass.valueOf(rows.first().cls) }.getOrDefault(app.marzha.core.FeeClass.OTHER),
+                            name, runCatching { FeeClass.valueOf(rows.first().cls) }.getOrDefault(FeeClass.OTHER),
                             rows.sumOf { it.amount }, rows.sumOf { it.count },
                         )
                     }
